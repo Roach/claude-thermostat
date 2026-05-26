@@ -43,6 +43,9 @@ Safe to delete — recreated on next session.
 | `CLAUDE_THERMOSTAT_CONTEXT_K` | `0` | Last-turn input-context setpoint (K tokens); `0` disables |
 | `CLAUDE_THERMOSTAT_COOLDOWN_TURNS` | `10` | Deadband: turns between re-fires after first |
 | `CLAUDE_THERMOSTAT_ANTIPATTERNS` | `1` | Set to `0` to disable antipattern detection |
+| `CLAUDE_THERMOSTAT_WINDOW_SEC` | `18000` | Rolling-window length in seconds (default 5h) |
+| `CLAUDE_THERMOSTAT_WINDOW_TOKENS` | `0` | Token setpoint across the rolling window; `0` disables. See [Subscription window](#subscription-window-approximation) |
+| `CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED` | `1` | `1` weights `cache_read` at 1.0x in the window sum; `0` excludes it |
 | `CLAUDE_THERMOSTAT_CONFIG` | `~/.claude/thermostat/config.env` | Path to optional config file |
 
 ### Config file
@@ -111,6 +114,26 @@ Wire it up alongside the thermostat:
   }
 ]
 ```
+
+## Subscription-window approximation
+
+Cost setpoints (dollars) map cleanly to API billing. Max/Pro/Team plans don't bill that way — they gate on token quotas inside rolling windows, and Anthropic doesn't expose that counter in any local file. `/usage` inside the CLI fetches it from the server at call time.
+
+When `CLAUDE_THERMOSTAT_WINDOW_TOKENS` is set, the thermostat builds a **local approximation** of that counter by scanning every transcript under `~/.claude/projects/` and summing weighted tokens whose timestamps fall in the last `CLAUDE_THERMOSTAT_WINDOW_SEC` seconds (default 5h). The header gains a `… tok/5h` segment, the alert fires when the sum crosses the setpoint, and the cooldown report includes a per-model breakdown.
+
+What this is good for:
+
+- A terminal-local gut-check of "how much have I burned in the last few hours, across every session" without leaving `claude`.
+- A calibration target: hit a real `/usage` cap once, compare it to the local number at that moment, and you have a multiplier for your plan.
+
+What it can't tell you:
+
+- The real quota state. `/usage` is still authoritative.
+- Anthropic's window bucketing (sliding vs aligned to a reset boundary) — this implementation assumes a continuous rolling window.
+- How cached reads are weighted against the quota. By default this counts `cache_read_input_tokens` at 1.0x as a conservative stand-in; set `CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED=0` to exclude them entirely.
+- Usage from `claude.ai`, direct API calls, or anything else not written to `~/.claude/projects/`.
+
+State for the window scan lives at `~/.claude/thermostat/window-index.json`. Safe to delete; it rebuilds on the next invocation (will re-scan transcript tails up to the configured max age).
 
 ## Manual test
 

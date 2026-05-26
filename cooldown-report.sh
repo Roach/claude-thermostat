@@ -53,7 +53,10 @@ from collections import Counter, defaultdict
 from datetime import datetime
 
 sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
-from _lib import is_real_user, in_session, turn_cost_usd, dedupe_turn, lookup_pricing
+from _lib import (
+    is_real_user, in_session, turn_cost_usd, dedupe_turn, lookup_pricing,
+    update_window_index, tokens_in_window, format_token_count,
+)
 
 path, session_id, reason, report_file, log_file = sys.argv[1:6]
 start_unix = int(sys.argv[6]) if len(sys.argv) > 6 else 0
@@ -295,6 +298,33 @@ lines.append(f"- **Tokens:** in={total_in:,} cache_write={total_cw:,} cache_read
 _paid = total_in + total_cw
 _hit  = total_cr / max(total_cr + _paid, 1)
 lines.append(f"- **Cache hit:** {_hit*100:.0f}% (higher = cheaper; <40% suggests context churn)")
+
+# Rolling-window approximation (subscription-quota stand-in). Only included
+# if the user has opted in by setting CLAUDE_THERMOSTAT_WINDOW_TOKENS. The
+# number is local math across all transcripts, not a real /usage read — see
+# the caveats block below.
+window_thresh = int(os.environ.get('CLAUDE_THERMOSTAT_WINDOW_TOKENS', '0') or 0)
+window_sec = int(os.environ.get('CLAUDE_THERMOSTAT_WINDOW_SEC', '18000') or 18000)
+window_count_cached = os.environ.get('CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED', '1') == '1'
+window_block = []
+if window_thresh > 0:
+    index_path = os.path.expanduser('~/.claude/thermostat/window-index.json')
+    try:
+        idx = update_window_index(index_path, count_cached=window_count_cached,
+                                  max_age_sec=max(window_sec + 7200, 25200))
+        totals = tokens_in_window(window_sec, idx)
+        wsum = sum(totals.values())
+        wh = window_sec // 3600
+        lines.append(
+            f"- **Window:** ~{format_token_count(wsum)} tokens in the last {wh}h "
+            f"(local approximation; see notes)"
+        )
+        # Stash a per-model breakdown for the notes section.
+        if totals:
+            window_block = sorted(totals.items(), key=lambda kv: -kv[1])
+    except Exception:
+        pass
+
 lines.append("")
 
 if suggestions:
@@ -320,6 +350,29 @@ else:
     lines.append("## Cost-reduction suggestions")
     lines.append("")
     lines.append("_No notable inefficiencies detected — this session looked efficient._")
+    lines.append("")
+
+if window_thresh > 0:
+    wh = window_sec // 3600
+    lines.append("## Subscription-window approximation — caveats")
+    lines.append("")
+    lines.append(
+        f"The window number above is a **local approximation**, not your real "
+        f"subscription quota. It sums weighted tokens across every Claude Code "
+        f"transcript under `~/.claude/projects/` within the last {wh}h."
+    )
+    lines.append("")
+    lines.append("- Anthropic's quota bucketing (sliding vs aligned to a reset boundary) isn't documented; this assumes a continuous rolling window.")
+    cw_note = ("counted at 1.0x" if window_count_cached
+               else "excluded (CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED=0)")
+    lines.append(f"- `cache_read_input_tokens` are {cw_note}; real subscription weighting is unknown.")
+    lines.append("- Only Claude Code traffic is counted. `claude.ai` web, direct API use, and other clients are invisible to this script.")
+    lines.append("- `/usage` inside the CLI is still the source of truth for your actual quota state.")
+    if window_block:
+        lines.append("")
+        lines.append("Breakdown by model in window:")
+        for m, n in window_block:
+            lines.append(f"- `{m}` — {format_token_count(n)} tokens")
     lines.append("")
 
 # Tool histogram (informational tail)

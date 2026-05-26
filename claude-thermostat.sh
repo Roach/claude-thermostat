@@ -16,6 +16,13 @@
 #   CLAUDE_THERMOSTAT_CONTEXT_K       0     0 = disabled
 #   CLAUDE_THERMOSTAT_COOLDOWN_TURNS  10    turns between re-fires after first
 #
+# Subscription-window approximation (local math, not a real quota read):
+#   CLAUDE_THERMOSTAT_WINDOW_SEC          18000  5h rolling window
+#   CLAUDE_THERMOSTAT_WINDOW_TOKENS       0      token setpoint; 0 disables
+#   CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED 1      1 weights cache_read at 1.0x
+# When WINDOW_TOKENS is set, the alert and header show the rolling sum across
+# every Claude Code transcript under ~/.claude/projects. See README for caveats.
+#
 # Wire-up (~/.claude/settings.json):
 #   "Stop": [{ "hooks": [{ "type": "command",
 #              "command": "/abs/path/to/claude-thermostat/claude-thermostat.sh" }] }]
@@ -54,6 +61,11 @@ COOLDOWN_TURNS="${CLAUDE_THERMOSTAT_COOLDOWN_TURNS:-10}"
 # Antipattern detection: fire the moment recurring waste is visible, even
 # if the dollar setpoint isn't hit yet.
 ANTIPATTERN_DETECT="${CLAUDE_THERMOSTAT_ANTIPATTERNS:-1}"     # 1 enables
+# Subscription-window approximation. Off by default; setpoint of 0 hides it
+# from the header so users on API billing don't see noise they don't need.
+WINDOW_SEC="${CLAUDE_THERMOSTAT_WINDOW_SEC:-18000}"           # 5h
+WINDOW_TOKENS_THRESH="${CLAUDE_THERMOSTAT_WINDOW_TOKENS:-0}"  # 0 disables
+WINDOW_COUNT_CACHED="${CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED:-1}"
 
 input="$(cat)"
 now=$(date +%s)
@@ -332,6 +344,33 @@ for r in reasons:
 PY
 }
 
+# --- rolling-window approximation (subscription quota stand-in) -------------
+#
+# Walks every transcript under ~/.claude/projects, tail-scans the new bytes
+# since last call (index sidecar lives at ~/.claude/thermostat/window-index.json),
+# and sums tokens whose timestamp falls in [now - WINDOW_SEC, now]. The number
+# we print here is local math, not Anthropic's actual quota state — see the
+# README "Subscription window" section for what this can and can't tell you.
+window_tokens() {
+  WINDOW_SEC_ARG="$WINDOW_SEC" \
+  WINDOW_COUNT_CACHED_ARG="$WINDOW_COUNT_CACHED" \
+  INDEX_PATH="$STATE_DIR/window-index.json" \
+  /usr/bin/python3 - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
+from _lib import update_window_index, tokens_in_window, format_token_count
+window_sec = int(os.environ.get('WINDOW_SEC_ARG') or 18000)
+count_cached = os.environ.get('WINDOW_COUNT_CACHED_ARG', '1') == '1'
+# Index keeps up to 7h of history so a 5h-or-shorter window is fully covered.
+max_age = max(window_sec + 7200, 25200)
+idx = update_window_index(os.environ['INDEX_PATH'], count_cached=count_cached, max_age_sec=max_age)
+totals = tokens_in_window(window_sec, idx)
+total = sum(totals.values())
+print(total)
+print(format_token_count(total))
+PY
+}
+
 { read -r session_start; read -r turn_count; read -r last_nag_turn; read -r nag_count; } < <(read_state)
 
 # First turn: stamp session start.
@@ -347,6 +386,15 @@ cost_cents="${cost_cents:-0}"
 context_k="${context_k:-0}"
 tx_turns="${tx_turns:-0}"
 cache_hit_pct="${cache_hit_pct:-0}"
+
+# Window mode only runs when the user has set a token setpoint. The index
+# scan is cheap but pointless when nothing reads its output.
+window_tokens_total=0
+window_tokens_display=""
+if [ "$WINDOW_TOKENS_THRESH" -gt 0 ]; then
+  { read -r window_tokens_total; read -r window_tokens_display; } < <(window_tokens)
+  window_tokens_total="${window_tokens_total:-0}"
+fi
 
 # Check cooldown: skip if we nagged recently and haven't hit cooldown turn yet.
 if [ "$last_nag_turn" -gt 0 ]; then
@@ -399,6 +447,11 @@ if [ "$CONTEXT_THRESH_K" -gt 0 ] && [ "${context_k:-0}" -ge "$CONTEXT_THRESH_K" 
   should_nag=1
   reasons+="  •  last-turn input context: ~${context_k}K tokens (each turn now costs more)"$'\n'
 fi
+if [ "$WINDOW_TOKENS_THRESH" -gt 0 ] && [ "$window_tokens_total" -ge "$WINDOW_TOKENS_THRESH" ]; then
+  should_nag=1
+  window_hours=$(( WINDOW_SEC / 3600 ))
+  reasons+="  •  ${window_tokens_display} tokens used in the last ${window_hours}h (local approx; not a real quota read)"$'\n'
+fi
 
 if [ "$should_nag" -eq 0 ]; then
   write_state "$session_start" "$turn_count" "$last_nag_turn" "$nag_count"
@@ -415,6 +468,10 @@ header="thermostat · turn ${turn_count}"
 [ "$cost_cents" -gt 0 ] && header+=" · ${cost_display}"
 [ "$context_k" -gt 0 ] && header+=" · ${context_k}K ctx"
 [ "$cache_hit_pct" -gt 0 ] && header+=" · ${cache_hit_pct}% cached"
+if [ "$WINDOW_TOKENS_THRESH" -gt 0 ] && [ -n "$window_tokens_display" ]; then
+  window_hours=$(( WINDOW_SEC / 3600 ))
+  header+=" · ${window_tokens_display} tok/${window_hours}h"
+fi
 
 # Context-sensitive suggestions: lead with what's most useful given triggers.
 suggestions=""

@@ -1058,7 +1058,7 @@
       <div class="part-num">§ 01.a</div>
       <div class="part-name">Setpoint</div>
       <div class="part-real mono">$CLAUDE_THERMOSTAT_COST_CENTS</div>
-      <p class="part-desc">The dollar ceiling you're willing to spend before being interrupted. Defaults to $50, raise or lower it to suit. The only setpoint enabled by default — time, turns, and context size are available as opt-in.</p>
+      <p class="part-desc">The dollar ceiling you're willing to spend before being interrupted. Defaults to $50, raise or lower it to suit. The only setpoint enabled by default. Time, turns, context size, and a rolling subscription-window token sum are available as opt-in.</p>
     </div>
 
     <!-- SENSOR -->
@@ -1496,6 +1496,21 @@
         <td class="meaning">Antipattern detection (re-Read loops, repeat Bash, exploration grep-chains, subagent over-spawn). Set to 0 to disable.</td>
       </tr>
       <tr>
+        <td class="name">CLAUDE_THERMOSTAT_WINDOW_SEC</td>
+        <td class="default"><span>18000</span></td>
+        <td class="meaning">Length of the rolling subscription window, in seconds. Default is 5h.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_WINDOW_TOKENS</td>
+        <td class="default"><span>0</span></td>
+        <td class="meaning">Token setpoint summed across the rolling window. <code>0</code> disables the subscription-style trigger and hides the <code>tok/5h</code> segment from the header. See the design note below for what this can and can&rsquo;t tell you.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED</td>
+        <td class="default"><span>1</span></td>
+        <td class="meaning">Whether <code>cache_read_input_tokens</code> count toward the window sum. <code>1</code> weights them at 1.0x (conservative), <code>0</code> excludes them.</td>
+      </tr>
+      <tr>
         <td class="name">CLAUDE_THERMOSTAT_CONFIG</td>
         <td class="default"><span>~/.claude/thermostat/config.env</span></td>
         <td class="meaning">Path to the optional config file sourced at hook start. Set to <code>/dev/null</code> to skip it.</td>
@@ -1529,6 +1544,11 @@
     <div class="why-card">
       <h3>Why transcript parsing</h3>
       <p>Time and turn count are proxies for cost. Real token counts from the transcript give an actual cost estimate and — more importantly — the context window size, which is what determines whether <code>/compact</code> will meaningfully reduce future turns.</p>
+    </div>
+    <div class="why-card">
+      <h3>Why the subscription window is an <em>approximation</em></h3>
+      <p>Cost setpoints map cleanly to API billing. Max and Pro plans gate on token quotas inside rolling windows, and that counter lives server-side. <code>/usage</code> in the CLI fetches it; no local file holds it.</p>
+      <p>When <code>CLAUDE_THERMOSTAT_WINDOW_TOKENS</code> is set, the hook builds a local stand-in by summing tokens across every transcript under <code class="mono">~/.claude/projects/</code> within the window. It&rsquo;s useful as a gut-check and as a calibration target once you&rsquo;ve hit a real <code>/usage</code> cap. It is <em>not</em> your real quota. Anthropic&rsquo;s bucketing isn&rsquo;t documented, and only Claude Code traffic is visible. Treat the number as directional.</p>
     </div>
   </div>
 </section>
