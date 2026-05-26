@@ -10,7 +10,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..900,0..100,0..1&family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
 
 <style>
   /* ------------------------------------------------------------- */
@@ -33,7 +33,7 @@
     --frost:        #93b5cf;
     --amber:        #c08b2a;
 
-    --ff-display: 'Fraunces', 'Times New Roman', serif;
+    --ff-display: 'Bricolage Grotesque', 'IBM Plex Sans', system-ui, sans-serif;
     --ff-body:    'IBM Plex Sans', system-ui, sans-serif;
     --ff-mono:    'IBM Plex Mono', ui-monospace, monospace;
 
@@ -98,17 +98,18 @@
   }
   .display {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 0;
-    font-weight: 380;
+    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 500;
+    font-weight: 500;
     line-height: 0.92;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.035em;
     color: var(--ink);
   }
   .display em {
-    font-style: italic;
-    font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
-    font-weight: 350;
+    font-style: normal;
+    font-variation-settings: "opsz" 96, "wdth" 85, "wght" 360;
+    font-weight: 360;
     color: var(--ember);
+    letter-spacing: -0.04em;
   }
   .mono { font-family: var(--ff-mono); }
 
@@ -254,41 +255,15 @@
     justify-self: end;
   }
   .hero-dial svg { width: 100%; height: 100%; display: block; }
-  .dial-readout {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-    text-align: center;
+  /* SVG-native dial readout — sits below the pivot, never collides with needle */
+  .dial-svg-text { font-family: var(--ff-display); }
+  #dialCurrent {
+    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 460;
+    letter-spacing: -0.045em;
+    font-variant-numeric: tabular-nums;
+    transition: fill 0.5s;
   }
-  .dial-current {
-    font-family: var(--ff-display);
-    font-variation-settings: "opsz" 144, "SOFT" 0, "WONK" 0;
-    font-weight: 360;
-    font-size: clamp(56px, 8vw, 88px);
-    line-height: 1;
-    letter-spacing: -0.04em;
-    transition: color 0.4s;
-  }
-  .dial-current.alert { color: var(--ember); }
-  .dial-label {
-    font-family: var(--ff-mono);
-    font-size: 10px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--ink-mute);
-    margin-top: 10px;
-  }
-  .dial-setpoint {
-    font-family: var(--ff-mono);
-    font-size: 11px;
-    color: var(--ink-soft);
-    margin-top: 4px;
-  }
-  .dial-setpoint b { color: var(--ember); font-weight: 500; }
+  #dialCurrent.alert { fill: var(--ember); }
 
   /* hero side meta strip */
   .meta-strip {
@@ -332,17 +307,19 @@
   }
   .section-head h2 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 0;
-    font-weight: 380;
+    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 500;
+    font-weight: 500;
     font-size: clamp(40px, 6vw, 76px);
     line-height: 0.95;
     margin: 0;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.035em;
   }
   .section-head h2 em {
-    font-style: italic;
-    font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
+    font-style: normal;
+    font-variation-settings: "opsz" 96, "wdth" 85, "wght" 360;
+    font-weight: 360;
     color: var(--ember);
+    letter-spacing: -0.045em;
   }
   .section-head .left {
     font-family: var(--ff-mono);
@@ -380,12 +357,12 @@
   }
   .part-name {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 90, "SOFT" 20, "WONK" 0;
-    font-weight: 420;
+    font-variation-settings: "opsz" 30, "wdth" 95, "wght" 540;
+    font-weight: 540;
     font-size: 30px;
     line-height: 1.05;
     margin: 14px 0 8px;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.025em;
   }
   .part-real {
     font-family: var(--ff-mono);
@@ -473,11 +450,11 @@
   }
   .demo-caption h3 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 90, "SOFT" 30, "WONK" 0;
-    font-weight: 380;
+    font-variation-settings: "opsz" 48, "wdth" 100, "wght" 500;
+    font-weight: 500;
     font-size: clamp(28px, 3.3vw, 40px);
     line-height: 1.05;
-    letter-spacing: -0.015em;
+    letter-spacing: -0.03em;
     margin: 0 0 18px;
   }
   .demo-caption p {
@@ -522,11 +499,12 @@
   }
   .chart-title {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 90, "SOFT" 30, "WONK" 0;
-    font-weight: 420;
+    font-variation-settings: "opsz" 30, "wdth" 100, "wght" 520;
+    font-weight: 520;
     font-size: clamp(22px, 2.4vw, 30px);
     line-height: 1.05;
     margin: 0;
+    letter-spacing: -0.02em;
   }
   .chart-legend {
     display: flex;
@@ -577,14 +555,15 @@
   }
   .stat .figure {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 144, "SOFT" 40, "WONK" 1;
-    font-weight: 380;
+    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 460;
+    font-weight: 460;
     font-size: clamp(36px, 4.5vw, 56px);
     line-height: 1;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.045em;
     color: var(--ink);
+    font-variant-numeric: tabular-nums;
   }
-  .stat .figure.savings { color: var(--ember); font-style: italic; }
+  .stat .figure.savings { color: var(--ember); font-variation-settings: "opsz" 96, "wdth" 85, "wght" 380; letter-spacing: -0.05em; }
   .stat .figure.cool { color: var(--cool); }
   .stat .sub {
     font-family: var(--ff-body);
@@ -605,11 +584,11 @@
   }
   .report h4 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 90, "SOFT" 0, "WONK" 0;
-    font-weight: 420;
+    font-variation-settings: "opsz" 30, "wdth" 100, "wght" 540;
+    font-weight: 540;
     font-size: 26px;
     margin: 0 0 4px;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.025em;
   }
   .report .session-id {
     font-family: var(--ff-mono);
@@ -636,10 +615,12 @@
   }
   .report-stat .v {
     font-family: var(--ff-display);
-    font-weight: 420;
+    font-variation-settings: "opsz" 24, "wdth" 100, "wght" 520;
+    font-weight: 520;
     font-size: 22px;
     margin-top: 4px;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
   }
   .report-stat .v small {
     font-family: var(--ff-mono);
@@ -717,11 +698,11 @@
   }
   .step h3 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 90, "SOFT" 20, "WONK" 0;
-    font-weight: 420;
+    font-variation-settings: "opsz" 24, "wdth" 100, "wght" 540;
+    font-weight: 540;
     font-size: 22px;
     margin: 0 0 6px 56px;
-    letter-spacing: -0.005em;
+    letter-spacing: -0.02em;
   }
   .step p {
     margin: 0 0 0 56px;
@@ -833,10 +814,10 @@
   }
   .why-card h3 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 90, "SOFT" 20, "WONK" 0;
-    font-weight: 420;
+    font-variation-settings: "opsz" 24, "wdth" 100, "wght" 540;
+    font-weight: 540;
     font-size: 24px;
-    letter-spacing: -0.005em;
+    letter-spacing: -0.025em;
     margin: 0 0 12px;
   }
   .why-card p {
@@ -872,18 +853,19 @@
   }
   .footer-mark {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 0;
-    font-weight: 380;
+    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 500;
+    font-weight: 500;
     font-size: clamp(54px, 9vw, 120px);
     line-height: 0.85;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.05em;
     grid-column: 1 / -1;
     margin-bottom: 30px;
   }
   .footer-mark em {
-    font-style: italic;
-    font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
+    font-style: normal;
+    font-variation-settings: "opsz" 96, "wdth" 85, "wght" 360;
     color: var(--ember);
+    letter-spacing: -0.055em;
   }
   .footer-meta {
     font-family: var(--ff-mono);
@@ -978,23 +960,20 @@
     <svg viewBox="0 0 400 400">
       <defs>
         <linearGradient id="heatArc" x1="0%" y1="100%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="#1f3a52" />
-          <stop offset="55%" stop-color="#c08b2a" />
+          <stop offset="0%"   stop-color="#1f3a52" />
+          <stop offset="55%"  stop-color="#c08b2a" />
           <stop offset="100%" stop-color="#c2410c" />
         </linearGradient>
-        <filter id="dialShadow" x="-20%" y="-20%" width="140%" height="140%">
-          <feGaussianBlur stdDeviation="4" />
-        </filter>
       </defs>
 
-      <!-- outer ring -->
+      <!-- outer rings -->
       <circle cx="200" cy="200" r="186" fill="none" stroke="#15110d" stroke-width="1.5" />
       <circle cx="200" cy="200" r="178" fill="none" stroke="#c8bea7" stroke-width="0.5" />
 
-      <!-- gauge arc (background) -->
+      <!-- gauge arc — background track -->
       <path d="M 70 290 A 150 150 0 1 1 330 290"
             fill="none" stroke="#ddd2b8" stroke-width="14" stroke-linecap="butt" />
-      <!-- gauge arc (heat) -->
+      <!-- gauge arc — heat fill (animated via stroke-dashoffset) -->
       <path d="M 70 290 A 150 150 0 1 1 330 290"
             fill="none" stroke="url(#heatArc)" stroke-width="14"
             stroke-linecap="butt"
@@ -1002,36 +981,48 @@
             stroke-dashoffset="707"
             id="heatArcStroke" />
 
-      <!-- tick marks -->
+      <!-- tick marks (drawn by JS) -->
       <g id="ticks" stroke="#15110d" stroke-width="1"></g>
 
-      <!-- setpoint marker (at ~70% around the arc = $50 of $73 max) -->
-      <g id="setpointMarker" transform="rotate(60 200 200)">
-        <line x1="200" y1="38" x2="200" y2="60"
-              stroke="#c2410c" stroke-width="3" stroke-linecap="round" />
-        <circle cx="200" cy="38" r="4" fill="#c2410c" />
+      <!-- setpoint marker — bold ember tick at $50 (68.5% around the 240° arc) -->
+      <!-- arc start = -120°, $50 of $73 → -120 + (50/73)*240 = +44.4° -->
+      <g transform="rotate(44.4 200 200)">
+        <!-- thick inner tick crossing the arc -->
+        <line x1="200" y1="34" x2="200" y2="66"
+              stroke="#c2410c" stroke-width="3.5" stroke-linecap="round" />
+        <!-- pin head -->
+        <circle cx="200" cy="32" r="4.5" fill="#c2410c" />
       </g>
 
-      <!-- needle -->
+      <!-- needle — shortened so it stays well above the readout text -->
       <g id="needle" transform="rotate(-120 200 200)">
-        <line x1="200" y1="200" x2="200" y2="62"
+        <line x1="200" y1="200" x2="200" y2="78"
               stroke="#15110d" stroke-width="2.5" stroke-linecap="round" />
-        <circle cx="200" cy="62" r="3" fill="#15110d" />
+        <circle cx="200" cy="78" r="3" fill="#15110d" />
       </g>
-      <circle cx="200" cy="200" r="10" fill="#15110d" />
-      <circle cx="200" cy="200" r="4" fill="#f1ebdd" />
 
-      <!-- micro labels -->
-      <text x="62" y="305" font-family="IBM Plex Mono, monospace" font-size="10" fill="#6b5f50" text-anchor="middle">$0</text>
+      <!-- pivot hub -->
+      <circle cx="200" cy="200" r="11" fill="#15110d" />
+      <circle cx="200" cy="200" r="4"  fill="#f1ebdd" />
+
+      <!-- scale endpoints + axis caption -->
+      <text x="62"  y="305" font-family="IBM Plex Mono, monospace" font-size="10" fill="#6b5f50" text-anchor="middle">$0</text>
       <text x="338" y="305" font-family="IBM Plex Mono, monospace" font-size="10" fill="#6b5f50" text-anchor="middle">$73+</text>
-      <text x="200" y="370" font-family="IBM Plex Mono, monospace" font-size="9" fill="#6b5f50" text-anchor="middle" letter-spacing="2.5">SESSION COST · USD</text>
-      <text x="200" y="40" font-family="IBM Plex Mono, monospace" font-size="9" fill="#c2410c" text-anchor="middle" letter-spacing="1.5">SETPOINT</text>
+      <text x="200" y="378" font-family="IBM Plex Mono, monospace" font-size="9"  fill="#6b5f50" text-anchor="middle" letter-spacing="2.5">SESSION COST · USD</text>
+
+      <!-- IN-DIAL READOUT — sits below the pivot, never collides with the needle -->
+      <text id="dialCurrent" class="dial-svg-text"
+            x="200" y="258"
+            font-size="56" fill="#15110d" text-anchor="middle">$0.00</text>
+      <text x="200" y="280"
+            font-family="IBM Plex Mono, monospace" font-size="9"
+            fill="#6b5f50" text-anchor="middle" letter-spacing="2.5">CURRENT READING</text>
+      <text x="200" y="300"
+            font-family="IBM Plex Mono, monospace" font-size="10"
+            fill="#3d342a" text-anchor="middle">
+        setpoint <tspan fill="#c2410c" font-weight="500">$50.00</tspan>
+      </text>
     </svg>
-    <div class="dial-readout">
-      <div class="dial-current" id="dialCurrent">$0.00</div>
-      <div class="dial-label">current reading</div>
-      <div class="dial-setpoint">setpoint <b id="dialSetpoint">$50.00</b></div>
-    </div>
   </div>
 
   <div class="meta-strip">
@@ -1338,8 +1329,8 @@
       </g>
 
       <!-- end-cost labels -->
-      <text x="965" y="42" font-family="Fraunces, serif" font-style="italic" font-size="18" fill="#c2410c">$96</text>
-      <text x="965" y="180" font-family="Fraunces, serif" font-style="italic" font-size="18" fill="#1f3a52">$41</text>
+      <text x="965" y="42"  font-family="Bricolage Grotesque, sans-serif" font-weight="500" font-size="18" fill="#c2410c" font-variant-numeric="tabular-nums" letter-spacing="-0.03em">$96</text>
+      <text x="965" y="180" font-family="Bricolage Grotesque, sans-serif" font-weight="500" font-size="18" fill="#1f3a52" font-variant-numeric="tabular-nums" letter-spacing="-0.03em">$41</text>
     </svg>
 
     <div class="chart-savings">
@@ -1593,9 +1584,13 @@
   })();
 
   // ---------------------------------------------------------------
-  //  Animated dial + cost counter
-  //  Sweeps from $0 → $73 over 9s, then snaps back. Loops.
-  //  Setpoint at $50 = 50/73 of the arc = breaches at ~68% of cycle.
+  //  Animated dial — narrative loop mirroring the cost-reduction chart:
+  //    1. climb from $0  → $52  (session running hot)
+  //    2. hold at $52    (alert state — readout turns ember)
+  //    3. drop  to $18   (user accepts /compact)
+  //    4. climb to $44   (work resumes, cache helps)
+  //    5. hold at $44    (settled, under setpoint)
+  //    6. reset to $0    (new session)
   // ---------------------------------------------------------------
   (function animateDial() {
     const needle      = document.getElementById('needle');
@@ -1604,57 +1599,70 @@
     const topbarCost  = document.getElementById('topbar-cost');
     if (!needle) return;
 
-    const ARC_LENGTH = 707;     // dasharray length we set on the path
+    const ARC_LENGTH = 707;
     const SETPOINT   = 50;
     const MAX        = 73;
-    const DURATION   = 9000;    // ms
-    const PAUSE_AT_TOP = 1200;  // hold after reaching the top
-    const RESET_TIME = 600;     // snap-back duration
+
+    // Phase table — [duration_ms, from, to, easing]
+    const E_OUT  = t => 1 - Math.pow(1 - t, 3);
+    const E_IN   = t => t * t * t;
+    const E_IO   = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+    const HOLD   = t => 1;
+    const PHASES = [
+      { dur: 7200, from: 0,  to: 52, ease: E_IO   },  // 1. climb to breach
+      { dur: 2200, from: 52, to: 52, ease: HOLD   },  // 2. hold in alert
+      { dur: 1400, from: 52, to: 18, ease: E_OUT  },  // 3. /compact drop
+      { dur: 5400, from: 18, to: 44, ease: E_IO   },  // 4. resume climb
+      { dur: 1800, from: 44, to: 44, ease: HOLD   },  // 5. settle
+      { dur: 1600, from: 44, to: 0,  ease: E_IN   },  // 6. session reset
+    ];
+    const TOTAL = PHASES.reduce((s, p) => s + p.dur, 0);
     let startTs;
 
-    function easeInOutCubic(t) {
-      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    function dollarAt(elapsed) {
+      const t = elapsed % TOTAL;
+      let acc = 0;
+      for (const p of PHASES) {
+        if (t < acc + p.dur) {
+          const local = (t - acc) / p.dur;
+          return p.from + (p.to - p.from) * p.ease(local);
+        }
+        acc += p.dur;
+      }
+      return 0;
     }
 
     function frame(ts) {
       if (!startTs) startTs = ts;
-      const cycle = (ts - startTs) % (DURATION + PAUSE_AT_TOP + RESET_TIME);
-      let dollar;
-      if (cycle < DURATION) {
-        const t = cycle / DURATION;
-        dollar = easeInOutCubic(t) * MAX;
-      } else if (cycle < DURATION + PAUSE_AT_TOP) {
-        dollar = MAX;
-      } else {
-        const t = (cycle - DURATION - PAUSE_AT_TOP) / RESET_TIME;
-        dollar = MAX * (1 - t);
-      }
+      const dollar = dollarAt(ts - startTs);
+      const frac   = Math.min(dollar / MAX, 1);
+      const angle  = -120 + frac * 240;
 
-      const frac = Math.min(dollar / MAX, 1);
-      const angle = -120 + frac * 240;
       needle.setAttribute('transform', `rotate(${angle} 200 200)`);
-      if (arcStroke) {
-        arcStroke.setAttribute('stroke-dashoffset', String(ARC_LENGTH * (1 - frac)));
-      }
+      arcStroke && arcStroke.setAttribute('stroke-dashoffset', String(ARC_LENGTH * (1 - frac)));
 
       const display = '$' + dollar.toFixed(2);
+      const alert   = dollar >= SETPOINT;
       if (dialCurrent) {
         dialCurrent.textContent = display;
-        dialCurrent.classList.toggle('alert', dollar >= SETPOINT);
+        dialCurrent.classList.toggle('alert', alert);
+        dialCurrent.setAttribute('fill', alert ? '#c2410c' : '#15110d');
       }
       if (topbarCost) {
         topbarCost.textContent = display;
-        topbarCost.style.color = dollar >= SETPOINT ? 'var(--ember)' : 'var(--ink)';
+        topbarCost.style.color = alert ? 'var(--ember)' : 'var(--ink)';
       }
 
       requestAnimationFrame(frame);
     }
 
-    // Respect reduced-motion preference
+    // Reduced-motion: park at the breach moment, no animation
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      needle.setAttribute('transform', `rotate(${-120 + (SETPOINT/MAX)*240} 200 200)`);
-      arcStroke && arcStroke.setAttribute('stroke-dashoffset', String(ARC_LENGTH * (1 - SETPOINT/MAX)));
+      const frac = SETPOINT / MAX;
+      needle.setAttribute('transform', `rotate(${-120 + frac*240} 200 200)`);
+      arcStroke && arcStroke.setAttribute('stroke-dashoffset', String(ARC_LENGTH * (1 - frac)));
       dialCurrent.textContent = '$50.00';
+      dialCurrent.setAttribute('fill', '#c2410c');
       topbarCost && (topbarCost.textContent = '$50.00');
       return;
     }
