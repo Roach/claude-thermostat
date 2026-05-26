@@ -10,7 +10,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
 
 <style>
   /* ------------------------------------------------------------- */
@@ -33,8 +33,8 @@
     --frost:        #93b5cf;
     --amber:        #c08b2a;
 
-    --ff-display: 'Bricolage Grotesque', 'IBM Plex Sans', system-ui, sans-serif;
-    --ff-body:    'IBM Plex Sans', system-ui, sans-serif;
+    --ff-display: 'Hanken Grotesk', system-ui, sans-serif;
+    --ff-body:    'Hanken Grotesk', system-ui, sans-serif;
     --ff-mono:    'IBM Plex Mono', ui-monospace, monospace;
 
     --maxw: 1280px;
@@ -98,18 +98,16 @@
   }
   .display {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 500;
-    font-weight: 500;
+    font-weight: 650;
     line-height: 0.92;
-    letter-spacing: -0.035em;
+    letter-spacing: -0.04em;
     color: var(--ink);
   }
   .display em {
-    font-style: normal;
-    font-variation-settings: "opsz" 96, "wdth" 85, "wght" 360;
-    font-weight: 360;
+    font-style: italic;
+    font-weight: 350;
     color: var(--ember);
-    letter-spacing: -0.04em;
+    letter-spacing: -0.025em;
   }
   .mono { font-family: var(--ff-mono); }
 
@@ -249,16 +247,18 @@
   /* dial */
   .hero-dial {
     position: relative;
-    aspect-ratio: 1 / 1;
+    aspect-ratio: 10 / 9;
     width: 100%;
-    max-width: 520px;
+    max-width: 540px;
     justify-self: end;
   }
   .hero-dial svg { width: 100%; height: 100%; display: block; }
   /* SVG-native dial readout — sits below the pivot, never collides with needle */
-  .dial-svg-text { font-family: var(--ff-display); }
+  .dial-svg-text {
+    font-family: var(--ff-display);
+    font-weight: 600;
+  }
   #dialCurrent {
-    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 460;
     letter-spacing: -0.045em;
     font-variant-numeric: tabular-nums;
     transition: fill 0.5s;
@@ -307,19 +307,17 @@
   }
   .section-head h2 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 500;
-    font-weight: 500;
+    font-weight: 650;
     font-size: clamp(40px, 6vw, 76px);
     line-height: 0.95;
     margin: 0;
-    letter-spacing: -0.035em;
+    letter-spacing: -0.04em;
   }
   .section-head h2 em {
-    font-style: normal;
-    font-variation-settings: "opsz" 96, "wdth" 85, "wght" 360;
-    font-weight: 360;
+    font-style: italic;
+    font-weight: 350;
     color: var(--ember);
-    letter-spacing: -0.045em;
+    letter-spacing: -0.025em;
   }
   .section-head .left {
     font-family: var(--ff-mono);
@@ -357,7 +355,6 @@
   }
   .part-name {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 30, "wdth" 95, "wght" 540;
     font-weight: 540;
     font-size: 30px;
     line-height: 1.05;
@@ -450,7 +447,6 @@
   }
   .demo-caption h3 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 48, "wdth" 100, "wght" 500;
     font-weight: 500;
     font-size: clamp(28px, 3.3vw, 40px);
     line-height: 1.05;
@@ -499,7 +495,6 @@
   }
   .chart-title {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 30, "wdth" 100, "wght" 520;
     font-weight: 520;
     font-size: clamp(22px, 2.4vw, 30px);
     line-height: 1.05;
@@ -555,15 +550,14 @@
   }
   .stat .figure {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 460;
-    font-weight: 460;
+    font-weight: 600;
     font-size: clamp(36px, 4.5vw, 56px);
     line-height: 1;
     letter-spacing: -0.045em;
     color: var(--ink);
     font-variant-numeric: tabular-nums;
   }
-  .stat .figure.savings { color: var(--ember); font-variation-settings: "opsz" 96, "wdth" 85, "wght" 380; letter-spacing: -0.05em; }
+  .stat .figure.savings { color: var(--ember); font-style: italic; font-weight: 400; letter-spacing: -0.035em; }
   .stat .figure.cool { color: var(--cool); }
   .stat .sub {
     font-family: var(--ff-body);
@@ -584,7 +578,6 @@
   }
   .report h4 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 30, "wdth" 100, "wght" 540;
     font-weight: 540;
     font-size: 26px;
     margin: 0 0 4px;
@@ -615,7 +608,6 @@
   }
   .report-stat .v {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 24, "wdth" 100, "wght" 520;
     font-weight: 520;
     font-size: 22px;
     margin-top: 4px;
@@ -698,7 +690,6 @@
   }
   .step h3 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 24, "wdth" 100, "wght" 540;
     font-weight: 540;
     font-size: 22px;
     margin: 0 0 6px 56px;
@@ -814,7 +805,6 @@
   }
   .why-card h3 {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 24, "wdth" 100, "wght" 540;
     font-weight: 540;
     font-size: 24px;
     letter-spacing: -0.025em;
@@ -853,19 +843,18 @@
   }
   .footer-mark {
     font-family: var(--ff-display);
-    font-variation-settings: "opsz" 96, "wdth" 100, "wght" 500;
-    font-weight: 500;
+    font-weight: 650;
     font-size: clamp(54px, 9vw, 120px);
     line-height: 0.85;
-    letter-spacing: -0.05em;
+    letter-spacing: -0.055em;
     grid-column: 1 / -1;
     margin-bottom: 30px;
   }
   .footer-mark em {
-    font-style: normal;
-    font-variation-settings: "opsz" 96, "wdth" 85, "wght" 360;
+    font-style: italic;
+    font-weight: 350;
     color: var(--ember);
-    letter-spacing: -0.055em;
+    letter-spacing: -0.035em;
   }
   .footer-meta {
     font-family: var(--ff-mono);
@@ -957,7 +946,7 @@
 
   <!-- DIAL -->
   <div class="hero-dial" aria-hidden="true">
-    <svg viewBox="0 0 400 400">
+    <svg viewBox="0 0 400 360">
       <defs>
         <linearGradient id="heatArc" x1="0%" y1="100%" x2="100%" y2="0%">
           <stop offset="0%"   stop-color="#1f3a52" />
@@ -965,10 +954,6 @@
           <stop offset="100%" stop-color="#c2410c" />
         </linearGradient>
       </defs>
-
-      <!-- outer rings -->
-      <circle cx="200" cy="200" r="186" fill="none" stroke="#15110d" stroke-width="1.5" />
-      <circle cx="200" cy="200" r="178" fill="none" stroke="#c8bea7" stroke-width="0.5" />
 
       <!-- gauge arc — background track -->
       <path d="M 70 290 A 150 150 0 1 1 330 290"
@@ -984,41 +969,37 @@
       <!-- tick marks (drawn by JS) -->
       <g id="ticks" stroke="#15110d" stroke-width="1"></g>
 
-      <!-- setpoint marker — bold ember tick at $50 (68.5% around the 240° arc) -->
-      <!-- arc start = -120°, $50 of $73 → -120 + (50/73)*240 = +44.4° -->
+      <!-- setpoint marker — bold ember tick at +44.4° ( = $50 of $73 along the 240° arc) -->
       <g transform="rotate(44.4 200 200)">
-        <!-- thick inner tick crossing the arc -->
         <line x1="200" y1="34" x2="200" y2="66"
               stroke="#c2410c" stroke-width="3.5" stroke-linecap="round" />
-        <!-- pin head -->
         <circle cx="200" cy="32" r="4.5" fill="#c2410c" />
       </g>
 
-      <!-- needle — shortened so it stays well above the readout text -->
+      <!-- needle — geometry: line from pivot to y=80 ends well above readout -->
       <g id="needle" transform="rotate(-120 200 200)">
-        <line x1="200" y1="200" x2="200" y2="78"
+        <line x1="200" y1="200" x2="200" y2="80"
               stroke="#15110d" stroke-width="2.5" stroke-linecap="round" />
-        <circle cx="200" cy="78" r="3" fill="#15110d" />
+        <circle cx="200" cy="80" r="3" fill="#15110d" />
       </g>
 
       <!-- pivot hub -->
       <circle cx="200" cy="200" r="11" fill="#15110d" />
       <circle cx="200" cy="200" r="4"  fill="#f1ebdd" />
 
-      <!-- scale endpoints + axis caption -->
-      <text x="62"  y="305" font-family="IBM Plex Mono, monospace" font-size="10" fill="#6b5f50" text-anchor="middle">$0</text>
-      <text x="338" y="305" font-family="IBM Plex Mono, monospace" font-size="10" fill="#6b5f50" text-anchor="middle">$73+</text>
-      <text x="200" y="378" font-family="IBM Plex Mono, monospace" font-size="9"  fill="#6b5f50" text-anchor="middle" letter-spacing="2.5">SESSION COST · USD</text>
+      <!-- scale endpoints -->
+      <text x="62"  y="318" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6b5f50" text-anchor="middle" letter-spacing="0.5">$0</text>
+      <text x="338" y="318" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6b5f50" text-anchor="middle" letter-spacing="0.5">$73+</text>
 
-      <!-- IN-DIAL READOUT — sits below the pivot, never collides with the needle -->
+      <!-- IN-DIAL READOUT — sits below the pivot in the U-opening -->
       <text id="dialCurrent" class="dial-svg-text"
-            x="200" y="258"
-            font-size="56" fill="#15110d" text-anchor="middle">$0.00</text>
-      <text x="200" y="280"
+            x="200" y="262"
+            font-size="58" fill="#15110d" text-anchor="middle">$0.00</text>
+      <text x="200" y="286"
             font-family="IBM Plex Mono, monospace" font-size="9"
-            fill="#6b5f50" text-anchor="middle" letter-spacing="2.5">CURRENT READING</text>
-      <text x="200" y="300"
-            font-family="IBM Plex Mono, monospace" font-size="10"
+            fill="#6b5f50" text-anchor="middle" letter-spacing="2.5">CURRENT READING · USD</text>
+      <text x="200" y="318"
+            font-family="IBM Plex Mono, monospace" font-size="10.5"
             fill="#3d342a" text-anchor="middle">
         setpoint <tspan fill="#c2410c" font-weight="500">$50.00</tspan>
       </text>
@@ -1329,8 +1310,8 @@
       </g>
 
       <!-- end-cost labels -->
-      <text x="965" y="42"  font-family="Bricolage Grotesque, sans-serif" font-weight="500" font-size="18" fill="#c2410c" font-variant-numeric="tabular-nums" letter-spacing="-0.03em">$96</text>
-      <text x="965" y="180" font-family="Bricolage Grotesque, sans-serif" font-weight="500" font-size="18" fill="#1f3a52" font-variant-numeric="tabular-nums" letter-spacing="-0.03em">$41</text>
+      <text x="965" y="42"  font-family="Hanken Grotesk, sans-serif" font-weight="650" font-size="20" fill="#c2410c" font-variant-numeric="tabular-nums" letter-spacing="-0.04em">$96</text>
+      <text x="965" y="180" font-family="Hanken Grotesk, sans-serif" font-weight="650" font-size="20" fill="#1f3a52" font-variant-numeric="tabular-nums" letter-spacing="-0.04em">$41</text>
     </svg>
 
     <div class="chart-savings">
