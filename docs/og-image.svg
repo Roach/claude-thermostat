@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <!-- Heat-arc gradient (matches the live dial) -->
+    <linearGradient id="heatArc" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#1f3a52"/>
+      <stop offset="55%"  stop-color="#c08b2a"/>
+      <stop offset="100%" stop-color="#c2410c"/>
+    </linearGradient>
+    <!-- Subtle paper grain via SVG turbulence -->
+    <filter id="grain" x="0%" y="0%" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix values="0 0 0 0 0.10  0 0 0 0 0.08  0 0 0 0 0.05  0 0 0 0.16 0"/>
+    </filter>
+    <!-- Fonts: Hanken Grotesk + IBM Plex Mono, fetched directly into the SVG -->
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,400..800;1,300..400&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap');
+      .display  { font-family: 'Hanken Grotesk', system-ui, sans-serif; font-weight: 650; letter-spacing: -0.04em; fill: #15110d; }
+      .display-em { font-family: 'Hanken Grotesk', system-ui, sans-serif; font-weight: 350; font-style: italic; letter-spacing: -0.025em; fill: #c2410c; }
+      .lead     { font-family: 'Hanken Grotesk', system-ui, sans-serif; font-weight: 400; fill: #3d342a; }
+      .mono     { font-family: 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: 0.05em; }
+      .mono-cap { font-family: 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: 0.2em; text-transform: uppercase; }
+      .ink      { fill: #15110d; }
+      .ink-soft { fill: #3d342a; }
+      .ink-mute { fill: #6b5f50; }
+      .ember    { fill: #c2410c; }
+    </style>
+  </defs>
+
+  <!-- Paper background -->
+  <rect width="1200" height="630" fill="#f1ebdd"/>
+  <!-- Paper grain overlay -->
+  <rect width="1200" height="630" filter="url(#grain)" opacity="0.35" style="mix-blend-mode: multiply"/>
+
+  <!-- ====================================================== -->
+  <!-- LEFT — branding + headline                               -->
+  <!-- ====================================================== -->
+
+  <!-- Brand mark + wordmark (top-left) -->
+  <g transform="translate(80, 80)">
+    <!-- thermostat-style mark: a small dial with an ember tick -->
+    <circle cx="14" cy="14" r="13" fill="#e9e0cc" stroke="#15110d" stroke-width="1.5"/>
+    <line x1="14" y1="14" x2="20" y2="9" stroke="#c2410c" stroke-width="2" stroke-linecap="round"/>
+    <text x="42" y="20" class="mono ink" font-size="14" font-weight="500">claude-thermostat</text>
+  </g>
+
+  <!-- Eyebrow -->
+  <text x="80" y="220" class="mono-cap ember" font-size="13" letter-spacing="3">
+    ◆  CLAUDE CODE  ·  STOP &amp; SESSIONEND HOOKS
+  </text>
+
+  <!-- Headline (two lines) -->
+  <text x="80" y="300" class="display" font-size="76">Keep your sessions</text>
+  <text x="80" y="380" class="display" font-size="76">from running <tspan class="display-em">hot.</tspan></text>
+
+  <!-- Subhead -->
+  <text x="80" y="445" class="lead" font-size="22">
+    A pair of shell hooks that watch your Claude Code session cost — and write a
+  </text>
+  <text x="80" y="475" class="lead" font-size="22">
+    post-session cooldown report telling you what would have been cheaper.
+  </text>
+
+  <!-- URL pill at bottom-left -->
+  <g transform="translate(80, 540)">
+    <text x="0" y="0" class="mono ink-soft" font-size="14">roach.github.io/claude-thermostat</text>
+    <line x1="0" y1="8" x2="320" y2="8" stroke="#3d342a" stroke-width="1"/>
+  </g>
+
+  <!-- ====================================================== -->
+  <!-- RIGHT — gauge in alert state                            -->
+  <!-- ====================================================== -->
+
+  <g transform="translate(800, 65)">
+    <!-- gauge background track -->
+    <path d="M 70 290 A 150 150 0 1 1 330 290"
+          fill="none" stroke="#ddd2b8" stroke-width="14" stroke-linecap="butt"/>
+    <!-- gauge heat-fill (at ~71% — needle reads $52, just past setpoint) -->
+    <path d="M 70 290 A 150 150 0 1 1 330 290"
+          fill="none" stroke="url(#heatArc)" stroke-width="14"
+          stroke-linecap="butt"
+          stroke-dasharray="707" stroke-dashoffset="205"/>
+
+    <!-- tick marks (24 ticks, every 6th major) -->
+    <g stroke="#15110d">
+      <!-- generated tick lines: for i in 0..24, angle = -120 + (i/24)*240 -->
+      <!-- minor ticks (cx,cy=200,200; rOuter=162; rInner=154 or 148 for major) -->
+      <!-- I'll just include a stylized subset for the static image -->
+      <g stroke-width="1">
+        <line x1="200" y1="38"  x2="200" y2="52"  transform="rotate(-120 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-110 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-100 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-90 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-80 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-70 200 200)"/>
+        <line x1="200" y1="38"  x2="200" y2="52"  transform="rotate(-60 200 200)" stroke-width="1.4"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-50 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-40 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-30 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-20 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(-10 200 200)"/>
+        <line x1="200" y1="38"  x2="200" y2="52"  transform="rotate(0 200 200)"   stroke-width="1.4"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(10 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(20 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(30 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(40 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(50 200 200)"/>
+        <line x1="200" y1="38"  x2="200" y2="52"  transform="rotate(60 200 200)"  stroke-width="1.4"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(70 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(80 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(90 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(100 200 200)"/>
+        <line x1="200" y1="46"  x2="200" y2="52"  transform="rotate(110 200 200)"/>
+        <line x1="200" y1="38"  x2="200" y2="52"  transform="rotate(120 200 200)" stroke-width="1.4"/>
+      </g>
+    </g>
+
+    <!-- setpoint marker (at +44.4°, = $50 of $73) -->
+    <g transform="rotate(44.4 200 200)">
+      <line x1="200" y1="34" x2="200" y2="66" stroke="#c2410c" stroke-width="3.5" stroke-linecap="round"/>
+      <circle cx="200" cy="32" r="4.5" fill="#c2410c"/>
+    </g>
+
+    <!-- needle parked at $52 (just past setpoint) — angle = -120 + (52/73)*240 = +50.96° -->
+    <g transform="rotate(50.96 200 200)">
+      <line x1="200" y1="200" x2="200" y2="80" stroke="#15110d" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="200" cy="80" r="3" fill="#15110d"/>
+    </g>
+
+    <!-- pivot hub -->
+    <circle cx="200" cy="200" r="11" fill="#15110d"/>
+    <circle cx="200" cy="200" r="4"  fill="#f1ebdd"/>
+
+    <!-- endpoint labels -->
+    <text x="62"  y="318" class="mono ink-mute" font-size="11" text-anchor="middle">$0</text>
+    <text x="338" y="318" class="mono ink-mute" font-size="11" text-anchor="middle">$73+</text>
+
+    <!-- in-dial readout — ember because we're past setpoint -->
+    <text x="200" y="262" class="display" font-size="58" fill="#c2410c"
+          text-anchor="middle" letter-spacing="-0.045em">$52.18</text>
+    <text x="200" y="286" class="mono-cap ink-mute" font-size="9" text-anchor="middle">CURRENT READING · USD</text>
+    <text x="200" y="318" class="mono ink-soft" font-size="10.5" text-anchor="middle">
+      setpoint <tspan class="ember" font-weight="500">$50.00</tspan>
+    </text>
+  </g>
+</svg>
