@@ -1,0 +1,1666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>claude-thermostat — keep your Claude Code sessions from running hot</title>
+<meta name="description" content="A Claude Code hook pair that watches session cost in real time and writes a post-session cooldown report with cost-reduction suggestions. The metaphor is precise: setpoint, sensor, actuator, deadband." />
+<meta property="og:title" content="claude-thermostat" />
+<meta property="og:description" content="Keep your Claude Code sessions from running hot. Real-cost transcript parsing, antipattern detection, and a post-session cooldown report." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..900,0..100,0..1&family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+
+<style>
+  /* ------------------------------------------------------------- */
+  /*  TOKENS                                                       */
+  /* ------------------------------------------------------------- */
+  :root {
+    --paper:        #f1ebdd;
+    --paper-deep:   #e9e0cc;
+    --paper-edge:   #ddd2b8;
+    --ink:          #15110d;
+    --ink-soft:     #3d342a;
+    --ink-mute:     #6b5f50;
+    --rule:         #c8bea7;
+    --rule-soft:    #d8cfb9;
+    --ember:        #c2410c;
+    --ember-bright: #e85d2c;
+    --ember-soft:   #f6d5c2;
+    --cool:         #1f3a52;
+    --cool-bright:  #3a5d80;
+    --frost:        #93b5cf;
+    --amber:        #c08b2a;
+
+    --ff-display: 'Fraunces', 'Times New Roman', serif;
+    --ff-body:    'IBM Plex Sans', system-ui, sans-serif;
+    --ff-mono:    'IBM Plex Mono', ui-monospace, monospace;
+
+    --maxw: 1280px;
+    --pad:  clamp(20px, 4vw, 56px);
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  RESET-ish                                                    */
+  /* ------------------------------------------------------------- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--paper);
+    font-family: var(--ff-body);
+    font-size: 16px;
+    line-height: 1.55;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  /* Paper grain — subtle SVG noise overlay */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.10  0 0 0 0 0.08  0 0 0 0 0.05  0 0 0 0.18 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+
+  a { color: inherit; text-decoration: none; }
+  ::selection { background: var(--ember); color: var(--paper); }
+
+  /* ------------------------------------------------------------- */
+  /*  REUSABLE TYPE                                                */
+  /* ------------------------------------------------------------- */
+  .eyebrow {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .eyebrow::before {
+    content: "◆ ";
+    color: var(--ember);
+    margin-right: 4px;
+  }
+  .section-num {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--ember);
+  }
+  .display {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 0;
+    font-weight: 380;
+    line-height: 0.92;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+  }
+  .display em {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
+    font-weight: 350;
+    color: var(--ember);
+  }
+  .mono { font-family: var(--ff-mono); }
+
+  /* ------------------------------------------------------------- */
+  /*  TOPBAR                                                       */
+  /* ------------------------------------------------------------- */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(8px);
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .topbar-inner {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 14px var(--pad);
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 24px;
+  }
+  .brand {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand-mark {
+    width: 18px; height: 18px;
+    border: 1.5px solid var(--ink);
+    border-radius: 50%;
+    position: relative;
+    background: var(--paper-deep);
+  }
+  .brand-mark::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 7px; height: 1.5px;
+    background: var(--ember);
+    transform-origin: 0 50%;
+    transform: translateY(-50%) rotate(38deg);
+  }
+  .live-readout {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pulse {
+    width: 8px; height: 8px;
+    background: var(--ember);
+    border-radius: 50%;
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.85); }
+    50%      { opacity: 1;    transform: scale(1); }
+  }
+  .top-links {
+    justify-self: end;
+    display: flex;
+    gap: 18px;
+    font-family: var(--ff-mono);
+    font-size: 12px;
+  }
+  .top-links a {
+    color: var(--ink-soft);
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .top-links a:hover {
+    color: var(--ember);
+    border-color: var(--ember);
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  HERO                                                         */
+  /* ------------------------------------------------------------- */
+  .hero {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: clamp(56px, 9vw, 120px) var(--pad) clamp(40px, 7vw, 96px);
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: clamp(24px, 5vw, 64px);
+    align-items: center;
+    position: relative;
+  }
+  .hero-text { position: relative; z-index: 2; }
+  .hero h1 {
+    font-size: clamp(54px, 9.2vw, 132px);
+    margin: 22px 0 28px;
+  }
+  .hero p.lead {
+    font-size: clamp(17px, 1.4vw, 20px);
+    line-height: 1.45;
+    max-width: 46ch;
+    color: var(--ink-soft);
+    margin: 0 0 36px;
+  }
+  .cta-row {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 22px;
+    font-family: var(--ff-mono);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    border: 1.5px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 0;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, transform 0.2s;
+  }
+  .btn:hover { background: var(--ember); border-color: var(--ember); transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--ink); }
+  .btn.ghost { background: transparent; color: var(--ink); }
+  .btn.ghost:hover { background: var(--ink); color: var(--paper); border-color: var(--ink); box-shadow: 3px 3px 0 var(--ember); }
+  .btn .arrow { transition: transform 0.2s; }
+  .btn:hover .arrow { transform: translateX(3px); }
+
+  /* dial */
+  .hero-dial {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    width: 100%;
+    max-width: 520px;
+    justify-self: end;
+  }
+  .hero-dial svg { width: 100%; height: 100%; display: block; }
+  .dial-readout {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    text-align: center;
+  }
+  .dial-current {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 144, "SOFT" 0, "WONK" 0;
+    font-weight: 360;
+    font-size: clamp(56px, 8vw, 88px);
+    line-height: 1;
+    letter-spacing: -0.04em;
+    transition: color 0.4s;
+  }
+  .dial-current.alert { color: var(--ember); }
+  .dial-label {
+    font-family: var(--ff-mono);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-top: 10px;
+  }
+  .dial-setpoint {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+    margin-top: 4px;
+  }
+  .dial-setpoint b { color: var(--ember); font-weight: 500; }
+
+  /* hero side meta strip */
+  .meta-strip {
+    grid-column: 1 / -1;
+    margin-top: clamp(40px, 6vw, 64px);
+    padding-top: 22px;
+    border-top: 1px solid var(--rule);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .meta-strip .k { color: var(--ink-mute); display: block; letter-spacing: 0.12em; text-transform: uppercase; font-size: 10px; margin-bottom: 6px; }
+  .meta-strip .v { color: var(--ink); font-weight: 500; font-size: 14px; }
+
+  /* Page-load staggered reveal */
+  .reveal > * { opacity: 0; transform: translateY(14px); animation: reveal 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
+  .reveal > *:nth-child(1) { animation-delay: 0.05s; }
+  .reveal > *:nth-child(2) { animation-delay: 0.15s; }
+  .reveal > *:nth-child(3) { animation-delay: 0.28s; }
+  .reveal > *:nth-child(4) { animation-delay: 0.42s; }
+  @keyframes reveal { to { opacity: 1; transform: translateY(0); } }
+
+  /* ------------------------------------------------------------- */
+  /*  SECTION SCAFFOLD                                             */
+  /* ------------------------------------------------------------- */
+  section {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: clamp(64px, 10vw, 128px) var(--pad);
+    position: relative;
+  }
+  .section-head {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: clamp(32px, 6vw, 80px);
+    align-items: baseline;
+    margin-bottom: clamp(40px, 6vw, 72px);
+  }
+  .section-head h2 {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 0;
+    font-weight: 380;
+    font-size: clamp(40px, 6vw, 76px);
+    line-height: 0.95;
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
+  .section-head h2 em {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
+    color: var(--ember);
+  }
+  .section-head .left {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--ember);
+    text-transform: uppercase;
+    padding-top: 14px;
+    white-space: nowrap;
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  ANATOMY                                                      */
+  /* ------------------------------------------------------------- */
+  .anatomy {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .part {
+    padding: 32px 24px 36px;
+    border-right: 1px solid var(--rule);
+    position: relative;
+    transition: background 0.25s;
+  }
+  .part:last-child { border-right: none; }
+  .part:hover { background: color-mix(in srgb, var(--paper-deep) 100%, transparent); }
+  .part-num {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    color: var(--ember);
+    letter-spacing: 0.15em;
+  }
+  .part-name {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 90, "SOFT" 20, "WONK" 0;
+    font-weight: 420;
+    font-size: 30px;
+    line-height: 1.05;
+    margin: 14px 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .part-real {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--ember);
+    margin-bottom: 18px;
+  }
+  .part-desc {
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+  }
+  .part-icon {
+    width: 56px;
+    height: 56px;
+    margin-bottom: 18px;
+    color: var(--ink);
+  }
+  .part-icon svg { width: 100%; height: 100%; }
+
+  /* ------------------------------------------------------------- */
+  /*  DEMO PANEL                                                   */
+  /* ------------------------------------------------------------- */
+  .demo-section { background: var(--paper); }
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: clamp(24px, 4vw, 44px);
+    align-items: start;
+  }
+  .panel {
+    border: 1.5px solid var(--ink);
+    background: var(--paper);
+    position: relative;
+    box-shadow: 6px 6px 0 var(--paper-deep);
+  }
+  .panel-header {
+    border-bottom: 1px solid var(--ink);
+    padding: 10px 16px;
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-header .dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    background: var(--ember);
+    border-radius: 50%;
+    margin-right: 8px;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ember) 25%, transparent);
+  }
+  .panel-body {
+    padding: 22px 20px 24px;
+    font-family: var(--ff-mono);
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--ink);
+    overflow-x: auto;
+  }
+  .alert-line { display: block; }
+  .alert-line.header {
+    color: var(--ember);
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+  .alert-line.bullet { color: var(--ink-soft); padding-left: 14px; position: relative; }
+  .alert-line.bullet::before { content: "•"; position: absolute; left: 0; color: var(--ember); }
+  .alert-line.choice { color: var(--cool); padding-left: 14px; position: relative; }
+  .alert-line.choice::before { content: "→"; position: absolute; left: 0; color: var(--cool); }
+  .alert-line.choice code {
+    background: var(--ember-soft);
+    color: var(--ember);
+    padding: 0 5px;
+    border-radius: 2px;
+    font-weight: 500;
+  }
+  .alert-line.dim { color: var(--ink-mute); font-style: italic; margin-top: 12px; }
+
+  .demo-caption {
+    padding-top: 8px;
+  }
+  .demo-caption h3 {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 90, "SOFT" 30, "WONK" 0;
+    font-weight: 380;
+    font-size: clamp(28px, 3.3vw, 40px);
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    margin: 0 0 18px;
+  }
+  .demo-caption p {
+    font-size: 15.5px;
+    line-height: 1.6;
+    color: var(--ink-soft);
+    max-width: 44ch;
+    margin: 0 0 14px;
+  }
+  .demo-caption .kbd {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    background: var(--paper-deep);
+    padding: 2px 7px;
+    border-radius: 2px;
+    border: 1px solid var(--rule);
+    color: var(--ink);
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  COST REDUCTION CHART                                         */
+  /* ------------------------------------------------------------- */
+  .chart-section {
+    background: linear-gradient(180deg, var(--paper) 0%, var(--paper-deep) 100%);
+  }
+  .chart-wrap {
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    box-shadow: 8px 8px 0 var(--ink);
+    padding: clamp(28px, 4vw, 48px);
+    position: relative;
+  }
+  .chart-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 18px;
+  }
+  .chart-title {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 90, "SOFT" 30, "WONK" 0;
+    font-weight: 420;
+    font-size: clamp(22px, 2.4vw, 30px);
+    line-height: 1.05;
+    margin: 0;
+  }
+  .chart-legend {
+    display: flex;
+    gap: 20px;
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .chart-legend .swatch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink-soft);
+  }
+  .chart-legend .swatch::before {
+    content: "";
+    width: 18px;
+    height: 3px;
+    border-radius: 2px;
+  }
+  .chart-legend .red::before    { background: var(--ember); }
+  .chart-legend .blue::before   { background: var(--cool); }
+  .chart-legend .dashed::before { background: transparent; border-top: 2px dashed var(--ink-mute); height: 0; }
+
+  .chart-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .chart-savings {
+    margin-top: 22px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    border-top: 1px solid var(--rule);
+    padding-top: 22px;
+  }
+  .stat {
+    font-family: var(--ff-mono);
+  }
+  .stat .label {
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 8px;
+  }
+  .stat .figure {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 144, "SOFT" 40, "WONK" 1;
+    font-weight: 380;
+    font-size: clamp(36px, 4.5vw, 56px);
+    line-height: 1;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+  }
+  .stat .figure.savings { color: var(--ember); font-style: italic; }
+  .stat .figure.cool { color: var(--cool); }
+  .stat .sub {
+    font-family: var(--ff-body);
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  REPORT PREVIEW                                               */
+  /* ------------------------------------------------------------- */
+  .report {
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    padding: clamp(28px, 4vw, 48px);
+    box-shadow: 10px 10px 0 var(--ember-soft);
+  }
+  .report h4 {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 90, "SOFT" 0, "WONK" 0;
+    font-weight: 420;
+    font-size: 26px;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .report .session-id {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--ink-mute);
+    margin-bottom: 22px;
+  }
+  .report-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px 36px;
+    margin-bottom: 28px;
+  }
+  .report-stat {
+    border-top: 1px solid var(--rule);
+    padding-top: 10px;
+  }
+  .report-stat .k {
+    font-family: var(--ff-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .report-stat .v {
+    font-family: var(--ff-display);
+    font-weight: 420;
+    font-size: 22px;
+    margin-top: 4px;
+    letter-spacing: -0.01em;
+  }
+  .report-stat .v small {
+    font-family: var(--ff-mono);
+    font-size: 13px;
+    color: var(--ink-mute);
+    margin-left: 6px;
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+  .findings h5 {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ember);
+    margin: 18px 0 10px;
+  }
+  .findings ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .findings li {
+    padding: 10px 0 10px 22px;
+    border-bottom: 1px dashed var(--rule);
+    font-size: 14.5px;
+    color: var(--ink-soft);
+    position: relative;
+    line-height: 1.5;
+  }
+  .findings li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: var(--ember);
+  }
+  .findings li b {
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .findings li code {
+    font-family: var(--ff-mono);
+    font-size: 12.5px;
+    background: var(--paper-deep);
+    padding: 0 5px;
+    border-radius: 2px;
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  INSTALL                                                      */
+  /* ------------------------------------------------------------- */
+  .install-grid {
+    display: grid;
+    grid-template-columns: 0.85fr 1.15fr;
+    gap: clamp(28px, 5vw, 56px);
+    align-items: start;
+  }
+  .steps { counter-reset: step; }
+  .step {
+    counter-increment: step;
+    padding: 22px 0;
+    border-top: 1px solid var(--rule);
+    position: relative;
+  }
+  .step:last-child { border-bottom: 1px solid var(--rule); }
+  .step::before {
+    content: counter(step, decimal-leading-zero);
+    position: absolute;
+    top: 22px;
+    left: 0;
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    color: var(--ember);
+    letter-spacing: 0.1em;
+  }
+  .step h3 {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 90, "SOFT" 20, "WONK" 0;
+    font-weight: 420;
+    font-size: 22px;
+    margin: 0 0 6px 56px;
+    letter-spacing: -0.005em;
+  }
+  .step p {
+    margin: 0 0 0 56px;
+    font-size: 14.5px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+  }
+  .step p code {
+    font-family: var(--ff-mono);
+    font-size: 13px;
+    background: var(--paper-deep);
+    padding: 1px 6px;
+    border-radius: 2px;
+  }
+
+  pre.code {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    border: 1.5px solid var(--ink);
+    padding: 22px 22px;
+    font-family: var(--ff-mono);
+    font-size: 13px;
+    line-height: 1.65;
+    overflow-x: auto;
+    position: relative;
+    box-shadow: 6px 6px 0 var(--paper-deep);
+  }
+  pre.code .c-key { color: #b9d4e8; }
+  pre.code .c-str { color: #f6c490; }
+  pre.code .c-cmt { color: #8a7e6c; font-style: italic; }
+  pre.code .c-fn  { color: #f7a072; }
+  pre.code .c-em  { color: var(--ember-bright); }
+  pre.code .tag {
+    position: absolute;
+    top: -1px; right: -1px;
+    background: var(--ember);
+    color: var(--paper);
+    padding: 4px 10px;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    border-bottom-left-radius: 0;
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  CONFIG TABLE                                                 */
+  /* ------------------------------------------------------------- */
+  .config-section { background: var(--paper-deep); }
+  .config-section::after {
+    /* edge ruler effect */
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .config-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--ff-mono);
+    font-size: 13px;
+  }
+  .config-table th {
+    text-align: left;
+    padding: 14px 16px 14px 0;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    font-weight: 500;
+    border-bottom: 1.5px solid var(--ink);
+    background: transparent;
+  }
+  .config-table td {
+    padding: 18px 16px 18px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  .config-table tr:hover td { background: color-mix(in srgb, var(--paper) 35%, transparent); }
+  .config-table td.name { color: var(--ember); white-space: nowrap; font-weight: 500; }
+  .config-table td.default {
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .config-table td.default span {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 2px 8px;
+    border-radius: 2px;
+  }
+  .config-table td.meaning {
+    font-family: var(--ff-body);
+    font-size: 14.5px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  WHY / FINE PRINT                                             */
+  /* ------------------------------------------------------------- */
+  .why-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 32px clamp(40px, 6vw, 80px);
+  }
+  .why-card {
+    border-top: 2px solid var(--ink);
+    padding-top: 22px;
+  }
+  .why-card h3 {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 90, "SOFT" 20, "WONK" 0;
+    font-weight: 420;
+    font-size: 24px;
+    letter-spacing: -0.005em;
+    margin: 0 0 12px;
+  }
+  .why-card p {
+    font-size: 15px;
+    color: var(--ink-soft);
+    line-height: 1.6;
+    margin: 0;
+  }
+  .why-card p code {
+    font-family: var(--ff-mono);
+    font-size: 13px;
+    background: var(--paper-deep);
+    padding: 1px 6px;
+    border-radius: 2px;
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  FOOTER                                                       */
+  /* ------------------------------------------------------------- */
+  footer {
+    margin-top: clamp(40px, 6vw, 80px);
+    border-top: 1.5px solid var(--ink);
+    background: var(--paper);
+  }
+  .footer-inner {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 48px var(--pad) 56px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 32px;
+    align-items: end;
+  }
+  .footer-mark {
+    font-family: var(--ff-display);
+    font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 0;
+    font-weight: 380;
+    font-size: clamp(54px, 9vw, 120px);
+    line-height: 0.85;
+    letter-spacing: -0.03em;
+    grid-column: 1 / -1;
+    margin-bottom: 30px;
+  }
+  .footer-mark em {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
+    color: var(--ember);
+  }
+  .footer-meta {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--ink-soft);
+    line-height: 1.7;
+  }
+  .footer-meta a { border-bottom: 1px solid currentColor; }
+  .footer-meta a:hover { color: var(--ember); }
+  .footer-mid {
+    font-family: var(--ff-mono);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+  }
+
+  /* ------------------------------------------------------------- */
+  /*  RESPONSIVE                                                   */
+  /* ------------------------------------------------------------- */
+  @media (max-width: 920px) {
+    .hero { grid-template-columns: 1fr; }
+    .hero-dial { max-width: 380px; justify-self: center; }
+    .meta-strip { grid-template-columns: repeat(2, 1fr); }
+    .anatomy { grid-template-columns: repeat(2, 1fr); }
+    .part:nth-child(2) { border-right: none; }
+    .part:nth-child(1), .part:nth-child(2) { border-bottom: 1px solid var(--rule); }
+    .demo-grid { grid-template-columns: 1fr; }
+    .install-grid { grid-template-columns: 1fr; }
+    .why-grid { grid-template-columns: 1fr; }
+    .report-grid { grid-template-columns: 1fr; }
+    .chart-savings { grid-template-columns: 1fr; }
+    .footer-inner { grid-template-columns: 1fr; }
+    .footer-mid { display: none; }
+    .section-head { grid-template-columns: 1fr; gap: 14px; }
+  }
+  @media (max-width: 560px) {
+    .anatomy { grid-template-columns: 1fr; }
+    .part { border-right: none; border-bottom: 1px solid var(--rule); }
+    .part:last-child { border-bottom: none; }
+    .top-links a:nth-child(1) { display: none; } /* hide docs link on mobile, keep github */
+  }
+</style>
+</head>
+<body>
+
+<!-- ======================================================= -->
+<!-- TOPBAR                                                  -->
+<!-- ======================================================= -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>claude-thermostat</span>
+    </div>
+    <div class="live-readout" aria-live="polite">
+      <span class="pulse"></span>
+      <span>currently reading <b id="topbar-cost" style="color:var(--ink);font-weight:500;">$0.00</b></span>
+    </div>
+    <nav class="top-links">
+      <a href="#install">Install</a>
+      <a href="#anatomy">Anatomy</a>
+      <a href="https://github.com/Roach/claude-thermostat" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ======================================================= -->
+<!-- HERO                                                    -->
+<!-- ======================================================= -->
+<section class="hero">
+  <div class="hero-text reveal">
+    <div class="eyebrow">Claude Code · Stop &amp; SessionEnd hooks</div>
+    <h1 class="display">
+      Keep your sessions<br />from running <em>hot.</em>
+    </h1>
+    <p class="lead">
+      A small pair of shell hooks that watches your Claude Code session cost in real time — and writes a post-session cooldown report telling you what would have been cheaper.
+    </p>
+    <div class="cta-row">
+      <a href="#install" class="btn">
+        <span>Install</span><span class="arrow">→</span>
+      </a>
+      <a href="https://github.com/Roach/claude-thermostat" target="_blank" rel="noopener" class="btn ghost">
+        <span>View source</span><span class="arrow">↗</span>
+      </a>
+    </div>
+  </div>
+
+  <!-- DIAL -->
+  <div class="hero-dial" aria-hidden="true">
+    <svg viewBox="0 0 400 400">
+      <defs>
+        <linearGradient id="heatArc" x1="0%" y1="100%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#1f3a52" />
+          <stop offset="55%" stop-color="#c08b2a" />
+          <stop offset="100%" stop-color="#c2410c" />
+        </linearGradient>
+        <filter id="dialShadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="4" />
+        </filter>
+      </defs>
+
+      <!-- outer ring -->
+      <circle cx="200" cy="200" r="186" fill="none" stroke="#15110d" stroke-width="1.5" />
+      <circle cx="200" cy="200" r="178" fill="none" stroke="#c8bea7" stroke-width="0.5" />
+
+      <!-- gauge arc (background) -->
+      <path d="M 70 290 A 150 150 0 1 1 330 290"
+            fill="none" stroke="#ddd2b8" stroke-width="14" stroke-linecap="butt" />
+      <!-- gauge arc (heat) -->
+      <path d="M 70 290 A 150 150 0 1 1 330 290"
+            fill="none" stroke="url(#heatArc)" stroke-width="14"
+            stroke-linecap="butt"
+            stroke-dasharray="707"
+            stroke-dashoffset="707"
+            id="heatArcStroke" />
+
+      <!-- tick marks -->
+      <g id="ticks" stroke="#15110d" stroke-width="1"></g>
+
+      <!-- setpoint marker (at ~70% around the arc = $50 of $73 max) -->
+      <g id="setpointMarker" transform="rotate(60 200 200)">
+        <line x1="200" y1="38" x2="200" y2="60"
+              stroke="#c2410c" stroke-width="3" stroke-linecap="round" />
+        <circle cx="200" cy="38" r="4" fill="#c2410c" />
+      </g>
+
+      <!-- needle -->
+      <g id="needle" transform="rotate(-120 200 200)">
+        <line x1="200" y1="200" x2="200" y2="62"
+              stroke="#15110d" stroke-width="2.5" stroke-linecap="round" />
+        <circle cx="200" cy="62" r="3" fill="#15110d" />
+      </g>
+      <circle cx="200" cy="200" r="10" fill="#15110d" />
+      <circle cx="200" cy="200" r="4" fill="#f1ebdd" />
+
+      <!-- micro labels -->
+      <text x="62" y="305" font-family="IBM Plex Mono, monospace" font-size="10" fill="#6b5f50" text-anchor="middle">$0</text>
+      <text x="338" y="305" font-family="IBM Plex Mono, monospace" font-size="10" fill="#6b5f50" text-anchor="middle">$73+</text>
+      <text x="200" y="370" font-family="IBM Plex Mono, monospace" font-size="9" fill="#6b5f50" text-anchor="middle" letter-spacing="2.5">SESSION COST · USD</text>
+      <text x="200" y="40" font-family="IBM Plex Mono, monospace" font-size="9" fill="#c2410c" text-anchor="middle" letter-spacing="1.5">SETPOINT</text>
+    </svg>
+    <div class="dial-readout">
+      <div class="dial-current" id="dialCurrent">$0.00</div>
+      <div class="dial-label">current reading</div>
+      <div class="dial-setpoint">setpoint <b id="dialSetpoint">$50.00</b></div>
+    </div>
+  </div>
+
+  <div class="meta-strip">
+    <div><span class="k">Event</span><span class="v">Stop / SessionEnd</span></div>
+    <div><span class="k">Cost source</span><span class="v">Transcript JSONL</span></div>
+    <div><span class="k">Models priced</span><span class="v">Opus · Sonnet · Haiku</span></div>
+    <div><span class="k">Footprint</span><span class="v">3 shell scripts · 1 py lib</span></div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<!-- ANATOMY                                                 -->
+<!-- ======================================================= -->
+<section id="anatomy">
+  <div class="section-head">
+    <div class="left">§ 01 · anatomy</div>
+    <h2>A thermostat, <em>exactly.</em></h2>
+  </div>
+
+  <div class="anatomy">
+    <!-- SETPOINT -->
+    <div class="part">
+      <div class="part-icon" aria-hidden="true">
+        <svg viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="28" cy="28" r="22" />
+          <path d="M28 8 V 14" />
+          <path d="M28 6 L31 12 H25 Z" fill="#c2410c" stroke="#c2410c"/>
+          <line x1="28" y1="28" x2="28" y2="13" stroke-width="2"/>
+          <circle cx="28" cy="28" r="2.5" fill="currentColor"/>
+        </svg>
+      </div>
+      <div class="part-num">§ 01.a</div>
+      <div class="part-name">Setpoint</div>
+      <div class="part-real mono">$CLAUDE_THERMOSTAT_COST_CENTS</div>
+      <p class="part-desc">The dollar ceiling you're willing to spend before being interrupted. Defaults to $50, raise or lower it to suit. The only setpoint enabled by default — time, turns, and context size are available as opt-in.</p>
+    </div>
+
+    <!-- SENSOR -->
+    <div class="part">
+      <div class="part-icon" aria-hidden="true">
+        <svg viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="22" y="6" width="12" height="32" rx="6" />
+          <circle cx="28" cy="44" r="6" fill="#c2410c" stroke="#c2410c"/>
+          <line x1="28" y1="44" x2="28" y2="18" stroke="#c2410c" stroke-width="3" stroke-linecap="round"/>
+          <line x1="36" y1="14" x2="40" y2="14" /><line x1="36" y1="20" x2="40" y2="20" /><line x1="36" y1="26" x2="40" y2="26" />
+        </svg>
+      </div>
+      <div class="part-num">§ 01.b</div>
+      <div class="part-name">Sensor</div>
+      <div class="part-real mono">transcript JSONL parser</div>
+      <p class="part-desc">Reads actual token usage per turn, applies per-model pricing, dedupes re-appended assistant messages by <code class="mono">message.id</code>. The reading matches what Anthropic actually bills.</p>
+    </div>
+
+    <!-- ACTUATOR -->
+    <div class="part">
+      <div class="part-icon" aria-hidden="true">
+        <svg viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M10 36 L18 28 L26 32 L34 18 L44 24 L50 14" />
+          <circle cx="34" cy="18" r="4" fill="#c2410c" stroke="#c2410c"/>
+          <path d="M34 18 L34 6 M28 12 L34 6 L40 12" stroke="#c2410c"/>
+          <line x1="6" y1="44" x2="50" y2="44" />
+        </svg>
+      </div>
+      <div class="part-num">§ 01.c</div>
+      <div class="part-name">Actuator</div>
+      <div class="part-real mono">exit 2 → Claude relays alert</div>
+      <p class="part-desc">When the setpoint trips, the hook exits with code 2. Claude Code surfaces the message as its next response, offers <code class="mono">/compact</code>, <code class="mono">/clear</code>, <code class="mono">/model sonnet</code>, or "keep going" — the user picks.</p>
+    </div>
+
+    <!-- DEADBAND -->
+    <div class="part">
+      <div class="part-icon" aria-hidden="true">
+        <svg viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M6 28 Q 14 12, 22 28 T 38 28 T 54 28" stroke="#c2410c"/>
+          <line x1="6" y1="18" x2="54" y2="18" stroke-dasharray="3 3"/>
+          <line x1="6" y1="38" x2="54" y2="38" stroke-dasharray="3 3"/>
+          <text x="51" y="16" font-family="IBM Plex Mono" font-size="6" fill="#6b5f50">hi</text>
+          <text x="51" y="44" font-family="IBM Plex Mono" font-size="6" fill="#6b5f50">lo</text>
+        </svg>
+      </div>
+      <div class="part-num">§ 01.d</div>
+      <div class="part-name">Deadband</div>
+      <div class="part-real mono">$CLAUDE_THERMOSTAT_COOLDOWN_TURNS</div>
+      <p class="part-desc">Hysteresis, measured in turns. After firing, the alert won't fire again for N more turns of actual work — so a single breach doesn't generate a stream of identical alerts.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<!-- DEMO: THE ALERT                                         -->
+<!-- ======================================================= -->
+<section class="demo-section" id="demo">
+  <div class="section-head">
+    <div class="left">§ 02 · the moment of intervention</div>
+    <h2>The alert, <em>verbatim.</em></h2>
+  </div>
+
+  <div class="demo-grid">
+    <div class="panel">
+      <div class="panel-header">
+        <span><span class="dot"></span>stop hook · exit 2</span>
+        <span>thermostat.sh</span>
+      </div>
+      <div class="panel-body">
+<span class="alert-line header">🌡  thermostat · turn 14 · 9m · $52.18 · 142K ctx · 67% cached</span>
+<span class="alert-line bullet">estimated session cost: $52.18</span>
+<span class="alert-line bullet">antipattern: re-Read of 'src/billing/router.ts' ×4 in last 30 tool calls</span>
+<span class="alert-line dim">Tell the user and ask them what they'd like to do:</span>
+<span class="alert-line choice"><code>/compact</code> — summarize history, shrink the context window; best when context is large and the task is ongoing</span>
+<span class="alert-line choice"><code>/model sonnet</code> — Opus input is 5× Sonnet ($15 vs $3 per M tokens); switch unless this turn really needs Opus reasoning</span>
+<span class="alert-line choice"><code>/clear</code> — wipe context entirely; good when pivoting to a new task</span>
+<span class="alert-line choice"><code>Close + reopen</code> — lowest-cost baseline; use when this task is done</span>
+<span class="alert-line choice"><code>Continue</code> — if you're nearly done and want to push through</span>
+      </div>
+    </div>
+
+    <div class="demo-caption">
+      <h3>Claude sees this. So do you.</h3>
+      <p>
+        Because the hook fires on <span class="kbd">Stop</span> and exits non-zero, Claude reactivates and reads the alert as part of its next turn. It surfaces the cost, the trigger, and a menu of context-aware actions.
+      </p>
+      <p>
+        Hitting <span class="kbd">/compact</span> alone routinely cuts the next ten turns by 60–80%. The alert is the prompt; you're the one in charge.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<!-- COST-REDUCTION ILLUSTRATION                             -->
+<!-- ======================================================= -->
+<section class="chart-section">
+  <div class="section-head">
+    <div class="left">§ 03 · the effect</div>
+    <h2>What "running cool" <em>looks like.</em></h2>
+  </div>
+
+  <div class="chart-wrap">
+    <div class="chart-head">
+      <h3 class="chart-title">Cumulative session cost — sample 30-turn session</h3>
+      <div class="chart-legend">
+        <span class="swatch red">unmonitored</span>
+        <span class="swatch blue">with thermostat</span>
+        <span class="swatch dashed">setpoint</span>
+      </div>
+    </div>
+
+    <svg class="chart-svg" viewBox="0 0 1000 360" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="redFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#c2410c" stop-opacity="0.18"/>
+          <stop offset="100%" stop-color="#c2410c" stop-opacity="0.0"/>
+        </linearGradient>
+        <linearGradient id="blueFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#1f3a52" stop-opacity="0.16"/>
+          <stop offset="100%" stop-color="#1f3a52" stop-opacity="0.0"/>
+        </linearGradient>
+        <pattern id="grid" width="60" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 60 0 L 0 0 0 40" fill="none" stroke="#ddd2b8" stroke-width="0.5"/>
+        </pattern>
+      </defs>
+
+      <!-- grid -->
+      <rect x="60" y="20" width="900" height="280" fill="url(#grid)"/>
+
+      <!-- y axis labels -->
+      <g font-family="IBM Plex Mono, monospace" font-size="10" fill="#6b5f50">
+        <text x="50" y="300" text-anchor="end">$0</text>
+        <text x="50" y="230" text-anchor="end">$25</text>
+        <text x="50" y="160" text-anchor="end">$50</text>
+        <text x="50" y="90" text-anchor="end">$75</text>
+        <text x="50" y="25" text-anchor="end">$100</text>
+      </g>
+
+      <!-- x axis labels -->
+      <g font-family="IBM Plex Mono, monospace" font-size="10" fill="#6b5f50">
+        <text x="60"  y="320" text-anchor="middle">turn 0</text>
+        <text x="240" y="320" text-anchor="middle">10</text>
+        <text x="420" y="320" text-anchor="middle">14</text>
+        <text x="600" y="320" text-anchor="middle">20</text>
+        <text x="780" y="320" text-anchor="middle">25</text>
+        <text x="960" y="320" text-anchor="middle">30</text>
+      </g>
+
+      <!-- setpoint line at $50 -->
+      <line x1="60" y1="160" x2="960" y2="160" stroke="#3d342a" stroke-width="1" stroke-dasharray="6 5"/>
+      <rect x="894" y="148" width="74" height="20" fill="#f1ebdd" stroke="#c2410c" stroke-width="1"/>
+      <text x="931" y="162" font-family="IBM Plex Mono, monospace" font-size="10" fill="#c2410c" text-anchor="middle">SETPOINT $50</text>
+
+      <!-- UNMONITORED LINE — climbs unimpeded to ~$96 -->
+      <path d="M 60 295
+               L 120 287
+               L 180 275
+               L 240 258
+               L 300 232
+               L 360 200
+               L 420 162
+               L 480 125
+               L 540 95
+               L 600 76
+               L 660 64
+               L 720 56
+               L 780 50
+               L 840 46
+               L 900 42
+               L 960 38
+               L 960 300
+               L 60 300 Z"
+            fill="url(#redFill)"/>
+      <path d="M 60 295
+               L 120 287
+               L 180 275
+               L 240 258
+               L 300 232
+               L 360 200
+               L 420 162
+               L 480 125
+               L 540 95
+               L 600 76
+               L 660 64
+               L 720 56
+               L 780 50
+               L 840 46
+               L 900 42
+               L 960 38"
+            fill="none" stroke="#c2410c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <!-- WITH THERMOSTAT LINE — fires at turn 14, /compact drops, climbs gentler -->
+      <path d="M 60 295
+               L 120 287
+               L 180 275
+               L 240 258
+               L 300 232
+               L 360 200
+               L 420 162
+               L 420 220
+               L 480 210
+               L 540 200
+               L 600 189
+               L 660 178
+               L 720 170
+               L 780 160
+               L 780 200
+               L 840 195
+               L 900 188
+               L 960 182
+               L 960 300
+               L 60 300 Z"
+            fill="url(#blueFill)"/>
+      <path d="M 60 295
+               L 120 287
+               L 180 275
+               L 240 258
+               L 300 232
+               L 360 200
+               L 420 162"
+            fill="none" stroke="#1f3a52" stroke-width="2.5" stroke-linecap="round"/>
+      <!-- the drop at turn 14 from /compact -->
+      <line x1="420" y1="162" x2="420" y2="220"
+            stroke="#1f3a52" stroke-width="2.5" stroke-dasharray="3 3"/>
+      <!-- after intervention 1 -->
+      <path d="M 420 220
+               L 480 210
+               L 540 200
+               L 600 189
+               L 660 178
+               L 720 170
+               L 780 160"
+            fill="none" stroke="#1f3a52" stroke-width="2.5" stroke-linecap="round"/>
+      <!-- drop at turn 25 from /clear -->
+      <line x1="780" y1="160" x2="780" y2="200"
+            stroke="#1f3a52" stroke-width="2.5" stroke-dasharray="3 3"/>
+      <!-- final segment -->
+      <path d="M 780 200
+               L 840 195
+               L 900 188
+               L 960 182"
+            fill="none" stroke="#1f3a52" stroke-width="2.5" stroke-linecap="round"/>
+
+      <!-- intervention markers -->
+      <g>
+        <circle cx="420" cy="162" r="6" fill="#f1ebdd" stroke="#c2410c" stroke-width="2"/>
+        <circle cx="420" cy="162" r="2.5" fill="#c2410c"/>
+        <line x1="420" y1="120" x2="420" y2="156" stroke="#c2410c" stroke-width="1"/>
+        <rect x="345" y="92" width="150" height="28" fill="#f1ebdd" stroke="#c2410c"/>
+        <text x="420" y="103" font-family="IBM Plex Mono, monospace" font-size="9" fill="#c2410c" text-anchor="middle" letter-spacing="1">
+          ALERT — TURN 14
+        </text>
+        <text x="420" y="115" font-family="IBM Plex Mono, monospace" font-size="9" fill="#3d342a" text-anchor="middle">
+          user: /compact
+        </text>
+      </g>
+      <g>
+        <circle cx="780" cy="160" r="6" fill="#f1ebdd" stroke="#c2410c" stroke-width="2"/>
+        <circle cx="780" cy="160" r="2.5" fill="#c2410c"/>
+        <line x1="780" y1="120" x2="780" y2="156" stroke="#c2410c" stroke-width="1"/>
+        <rect x="705" y="92" width="150" height="28" fill="#f1ebdd" stroke="#c2410c"/>
+        <text x="780" y="103" font-family="IBM Plex Mono, monospace" font-size="9" fill="#c2410c" text-anchor="middle" letter-spacing="1">
+          ALERT — TURN 25
+        </text>
+        <text x="780" y="115" font-family="IBM Plex Mono, monospace" font-size="9" fill="#3d342a" text-anchor="middle">
+          user: /clear + new task
+        </text>
+      </g>
+
+      <!-- end-cost labels -->
+      <text x="965" y="42" font-family="Fraunces, serif" font-style="italic" font-size="18" fill="#c2410c">$96</text>
+      <text x="965" y="180" font-family="Fraunces, serif" font-style="italic" font-size="18" fill="#1f3a52">$41</text>
+    </svg>
+
+    <div class="chart-savings">
+      <div class="stat">
+        <div class="label">Unmonitored end-cost</div>
+        <div class="figure cool" style="color:var(--ember)">$96.34</div>
+        <div class="sub">30-turn session, no interventions, Opus-heavy.</div>
+      </div>
+      <div class="stat">
+        <div class="label">With thermostat</div>
+        <div class="figure cool">$41.02</div>
+        <div class="sub">Two alerts → one <code class="mono">/compact</code>, one <code class="mono">/clear</code> on task pivot.</div>
+      </div>
+      <div class="stat">
+        <div class="label">Saved</div>
+        <div class="figure savings">$55.32</div>
+        <div class="sub">57% lower. Same work delivered, same model quality.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<!-- REPORT PREVIEW                                          -->
+<!-- ======================================================= -->
+<section>
+  <div class="section-head">
+    <div class="left">§ 04 · post-session</div>
+    <h2>A cooldown report, <em>for next time.</em></h2>
+  </div>
+
+  <div class="report">
+    <h4>Cooldown report</h4>
+    <div class="session-id mono">session 6788b2fd · ended 2026-05-22T15:51 · reason: clear</div>
+
+    <div class="report-grid">
+      <div class="report-stat">
+        <div class="k">Cost</div>
+        <div class="v">$13.32 <small>opus-4-7 · 100%</small></div>
+      </div>
+      <div class="report-stat">
+        <div class="k">Duration</div>
+        <div class="v">116 min <small>7 turns</small></div>
+      </div>
+      <div class="report-stat">
+        <div class="k">Tokens</div>
+        <div class="v">552K <small>cache_read · 91% of input</small></div>
+      </div>
+      <div class="report-stat">
+        <div class="k">Cache hit</div>
+        <div class="v">96% <small>healthy — minimal context churn</small></div>
+      </div>
+    </div>
+
+    <div class="findings">
+      <h5>Suggestions for next session</h5>
+      <ul>
+        <li><b>Model choice</b> — 4 Opus turns produced &lt;500 output tokens. These were small lookups; Sonnet (5× cheaper) would have done it. Use <code>/model sonnet</code> for routine work.</li>
+        <li><b>Skill candidate</b> — Read <code>docs/pricing-spec.md</code> 5× — convert to a skill at <code>~/.claude/skills/</code> so it loads on demand rather than re-reading every turn.</li>
+        <li><b>Tool choice</b> — 38 Grep/Read/Glob calls (61% of all tool use). Try <code>mcp__auggie__codebase-retrieval</code> for natural-language lookups; one call usually replaces a chain.</li>
+        <li><b>Prompt pattern</b> — 12/19 prompts were &lt;60 chars. Many turn-based corrections — one detailed first prompt often beats many small follow-ups and reuses cache better.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<!-- INSTALL                                                 -->
+<!-- ======================================================= -->
+<section id="install">
+  <div class="section-head">
+    <div class="left">§ 05 · install</div>
+    <h2>Wire it up <em>once.</em></h2>
+  </div>
+
+  <div class="install-grid">
+    <div class="steps">
+      <div class="step">
+        <h3>Clone the repo</h3>
+        <p>Put it anywhere on disk you'd keep a personal hook. You only need the shell scripts and the python helper — no install step.</p>
+      </div>
+      <div class="step">
+        <h3>Add two hooks to <code>settings.json</code></h3>
+        <p>Open <code>~/.claude/settings.json</code> and register the Stop and SessionEnd hooks. Restart any open Claude Code sessions for them to take effect.</p>
+      </div>
+      <div class="step">
+        <h3>Optional: set your setpoint</h3>
+        <p>Drop a config file at <code>~/.claude/thermostat/config.env</code>, or set <code>CLAUDE_THERMOSTAT_COST_CENTS</code> in your shell. Default is $50.</p>
+      </div>
+    </div>
+
+    <div>
+<pre class="code"><span class="tag">~/.claude/settings.json</span><span class="c-cmt"># Stop hook fires after every Claude response.</span>
+<span class="c-cmt"># exit 2 surfaces the alert as Claude's next message.</span>
+<span class="c-key">"Stop"</span>: [{
+  <span class="c-key">"hooks"</span>: [{
+    <span class="c-key">"type"</span>:    <span class="c-str">"command"</span>,
+    <span class="c-key">"command"</span>: <span class="c-str">"<span class="c-em">/abs/path/to/</span>claude-thermostat/claude-thermostat.sh"</span>
+  }]
+}],
+<span class="c-key">"SessionEnd"</span>: [{
+  <span class="c-key">"hooks"</span>: [{
+    <span class="c-key">"type"</span>:    <span class="c-str">"command"</span>,
+    <span class="c-key">"command"</span>: <span class="c-str">"<span class="c-em">/abs/path/to/</span>claude-thermostat/cooldown-report.sh"</span>
+  }]
+}]</pre>
+<br />
+<pre class="code"><span class="tag">~/.claude/thermostat/config.env</span><span class="c-cmt"># All optional. Cost is the only enabled trigger by default.</span>
+<span class="c-fn">CLAUDE_THERMOSTAT_COST_CENTS</span>=<span class="c-em">3000</span>     <span class="c-cmt"># fire at $30 instead of $50</span>
+<span class="c-fn">CLAUDE_THERMOSTAT_COOLDOWN_TURNS</span>=<span class="c-em">15</span>
+<span class="c-fn">CLAUDE_THERMOSTAT_CONTEXT_K</span>=<span class="c-em">120</span>      <span class="c-cmt"># also fire above 120K context</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<!-- CONFIG TABLE                                            -->
+<!-- ======================================================= -->
+<section class="config-section">
+  <div class="section-head">
+    <div class="left">§ 06 · controls</div>
+    <h2>Every dial, <em>labeled.</em></h2>
+  </div>
+
+  <table class="config-table">
+    <thead>
+      <tr>
+        <th style="width: 38%;">Env var</th>
+        <th style="width: 14%;">Default</th>
+        <th>Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_COST_CENTS</td>
+        <td class="default"><span>5000</span></td>
+        <td class="meaning">Cost setpoint, in US cents. The only trigger enabled by default.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_TIME_SEC</td>
+        <td class="default"><span>0</span></td>
+        <td class="meaning">Wall-clock session-age trigger, in seconds. Zero disables; computed and shown in the alert header regardless.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_TURNS</td>
+        <td class="default"><span>0</span></td>
+        <td class="meaning">Turn-count trigger. Zero disables.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_CONTEXT_K</td>
+        <td class="default"><span>0</span></td>
+        <td class="meaning">Last-turn input-context trigger, in thousands of tokens. Useful for getting nudged toward <code>/compact</code> before each new turn pays for the whole window.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_COOLDOWN_TURNS</td>
+        <td class="default"><span>10</span></td>
+        <td class="meaning">Hysteresis. After firing, the alert won't fire again for this many turns of actual work.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_ANTIPATTERNS</td>
+        <td class="default"><span>1</span></td>
+        <td class="meaning">Antipattern detection (re-Read loops, repeat Bash, exploration grep-chains, subagent over-spawn). Set to 0 to disable.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_CONFIG</td>
+        <td class="default"><span>~/.claude/thermostat/config.env</span></td>
+        <td class="meaning">Path to the optional config file sourced at hook start. Set to <code>/dev/null</code> to skip it.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ======================================================= -->
+<!-- WHY                                                     -->
+<!-- ======================================================= -->
+<section id="why">
+  <div class="section-head">
+    <div class="left">§ 07 · design notes</div>
+    <h2>Why it works <em>this way.</em></h2>
+  </div>
+
+  <div class="why-grid">
+    <div class="why-card">
+      <h3>Why dedupe by <code class="mono">message.id</code></h3>
+      <p>Claude Code re-appends the same assistant message on every tool round-trip — same <code>msg_xxx</code> id, same usage block. Billing-correct accounting treats each unique <code>message.id</code> as one API call. So we dedupe before summing input, cache-write, and output. Cache-read is billed per request, so it sums across the unique calls.</p>
+    </div>
+    <div class="why-card">
+      <h3>Why <code class="mono">Stop</code> + <code class="mono">exit 2</code></h3>
+      <p>The Stop event fires after Claude finishes a response. An exit code of 2 re-activates Claude with your stderr as a system message, so the alert appears as Claude's next response asking the user what to do. The user sees cost stats and can immediately type <code>/compact</code> or <code>/clear</code>.</p>
+    </div>
+    <div class="why-card">
+      <h3>Why cooldown in turns, not seconds</h3>
+      <p>A session might idle for hours, then resume. Measuring hysteresis by turns of actual work ensures the alert reappears after something meaningful has happened — not just time passing while the laptop slept.</p>
+    </div>
+    <div class="why-card">
+      <h3>Why transcript parsing</h3>
+      <p>Time and turn count are proxies for cost. Real token counts from the transcript give an actual cost estimate and — more importantly — the context window size, which is what determines whether <code>/compact</code> will meaningfully reduce future turns.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<!-- FOOTER                                                  -->
+<!-- ======================================================= -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-mark">
+      <span>claude</span><br />
+      <em>thermostat.</em>
+    </div>
+    <div class="footer-meta">
+      Single root commit · MIT-style use<br />
+      Built as a personal hook · shared as a public artifact.
+    </div>
+    <div class="footer-mid">— § —</div>
+    <div class="footer-meta" style="text-align:right;">
+      <a href="https://github.com/Roach/claude-thermostat" target="_blank" rel="noopener">github.com/Roach/claude-thermostat ↗</a><br />
+      <a href="https://github.com/Roach/claude-thermostat#readme" target="_blank" rel="noopener">README</a> · <a href="https://docs.claude.com/en/docs/claude-code/hooks" target="_blank" rel="noopener">Claude Code hooks ↗</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // ---------------------------------------------------------------
+  //  Tick marks for the hero dial (drawn in JS for tidiness)
+  // ---------------------------------------------------------------
+  (function drawTicks() {
+    const ticks = document.getElementById('ticks');
+    if (!ticks) return;
+    const cx = 200, cy = 200, rOuter = 162, rInnerMinor = 154, rInnerMajor = 148;
+    // arc spans -120deg (start, $0) → +120deg (end, $73+), so 240deg total
+    const total = 24;
+    for (let i = 0; i <= total; i++) {
+      const t = i / total;                      // 0..1
+      const ang = (-120 + t * 240) * Math.PI / 180;
+      const isMajor = (i % 6 === 0);
+      const r1 = isMajor ? rInnerMajor : rInnerMinor;
+      const x1 = cx + Math.sin(ang) * r1;
+      const y1 = cy - Math.cos(ang) * r1;
+      const x2 = cx + Math.sin(ang) * rOuter;
+      const y2 = cy - Math.cos(ang) * rOuter;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x1.toFixed(2));
+      line.setAttribute('y1', y1.toFixed(2));
+      line.setAttribute('x2', x2.toFixed(2));
+      line.setAttribute('y2', y2.toFixed(2));
+      line.setAttribute('stroke', isMajor ? '#15110d' : '#a89c84');
+      line.setAttribute('stroke-width', isMajor ? '1.4' : '0.7');
+      ticks.appendChild(line);
+    }
+  })();
+
+  // ---------------------------------------------------------------
+  //  Animated dial + cost counter
+  //  Sweeps from $0 → $73 over 9s, then snaps back. Loops.
+  //  Setpoint at $50 = 50/73 of the arc = breaches at ~68% of cycle.
+  // ---------------------------------------------------------------
+  (function animateDial() {
+    const needle      = document.getElementById('needle');
+    const arcStroke   = document.getElementById('heatArcStroke');
+    const dialCurrent = document.getElementById('dialCurrent');
+    const topbarCost  = document.getElementById('topbar-cost');
+    if (!needle) return;
+
+    const ARC_LENGTH = 707;     // dasharray length we set on the path
+    const SETPOINT   = 50;
+    const MAX        = 73;
+    const DURATION   = 9000;    // ms
+    const PAUSE_AT_TOP = 1200;  // hold after reaching the top
+    const RESET_TIME = 600;     // snap-back duration
+    let startTs;
+
+    function easeInOutCubic(t) {
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    function frame(ts) {
+      if (!startTs) startTs = ts;
+      const cycle = (ts - startTs) % (DURATION + PAUSE_AT_TOP + RESET_TIME);
+      let dollar;
+      if (cycle < DURATION) {
+        const t = cycle / DURATION;
+        dollar = easeInOutCubic(t) * MAX;
+      } else if (cycle < DURATION + PAUSE_AT_TOP) {
+        dollar = MAX;
+      } else {
+        const t = (cycle - DURATION - PAUSE_AT_TOP) / RESET_TIME;
+        dollar = MAX * (1 - t);
+      }
+
+      const frac = Math.min(dollar / MAX, 1);
+      const angle = -120 + frac * 240;
+      needle.setAttribute('transform', `rotate(${angle} 200 200)`);
+      if (arcStroke) {
+        arcStroke.setAttribute('stroke-dashoffset', String(ARC_LENGTH * (1 - frac)));
+      }
+
+      const display = '$' + dollar.toFixed(2);
+      if (dialCurrent) {
+        dialCurrent.textContent = display;
+        dialCurrent.classList.toggle('alert', dollar >= SETPOINT);
+      }
+      if (topbarCost) {
+        topbarCost.textContent = display;
+        topbarCost.style.color = dollar >= SETPOINT ? 'var(--ember)' : 'var(--ink)';
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    // Respect reduced-motion preference
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      needle.setAttribute('transform', `rotate(${-120 + (SETPOINT/MAX)*240} 200 200)`);
+      arcStroke && arcStroke.setAttribute('stroke-dashoffset', String(ARC_LENGTH * (1 - SETPOINT/MAX)));
+      dialCurrent.textContent = '$50.00';
+      topbarCost && (topbarCost.textContent = '$50.00');
+      return;
+    }
+    requestAnimationFrame(frame);
+  })();
+</script>
+
+</body>
+</html>
