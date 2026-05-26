@@ -932,7 +932,7 @@
       Keep your sessions<br />from running <em>hot.</em>
     </h1>
     <p class="lead">
-      A small pair of shell hooks that watches your Claude Code session cost in real time — and writes a post-session cooldown report telling you what would have been cheaper.
+      A pair of shell hooks that watch your Claude Code session cost in real time, and write a post-session cooldown report telling you what would have been cheaper.
     </p>
     <div class="cta-row">
       <a href="#install" class="btn">
@@ -1126,7 +1126,7 @@
         Because the hook fires on <span class="kbd">Stop</span> and exits non-zero, Claude reactivates and reads the alert as part of its next turn. It surfaces the cost, the trigger, and a menu of context-aware actions.
       </p>
       <p>
-        Hitting <span class="kbd">/compact</span> alone routinely cuts the next ten turns by 60–80%. The alert is the prompt; you're the one in charge.
+        The alert is the prompt; you're the one in charge. <span class="kbd">/compact</span>, <span class="kbd">/clear</span>, or close-and-pivot are all one keystroke away.
       </p>
     </div>
   </div>
@@ -1138,7 +1138,7 @@
 <section class="chart-section">
   <div class="section-head">
     <div class="left">§ 03 · the effect</div>
-    <h2>What "running cool" <em>looks like.</em></h2>
+    <h2>Running cool, <em>visualized.</em></h2>
   </div>
 
   <div class="chart-wrap">
@@ -1317,18 +1317,18 @@
     <div class="chart-savings">
       <div class="stat">
         <div class="label">Unmonitored end-cost</div>
-        <div class="figure cool" style="color:var(--ember)">$96.34</div>
-        <div class="sub">30-turn session, no interventions, Opus-heavy.</div>
+        <div class="figure" style="color:var(--ember)">$96.34</div>
+        <div class="sub">30 turns, no interventions, Opus-heavy.</div>
       </div>
       <div class="stat">
         <div class="label">With thermostat</div>
         <div class="figure cool">$41.02</div>
-        <div class="sub">Two alerts → one <code class="mono">/compact</code>, one <code class="mono">/clear</code> on task pivot.</div>
+        <div class="sub">Two alerts &mdash; one <code class="mono">/compact</code>, one <code class="mono">/clear</code> on task pivot.</div>
       </div>
       <div class="stat">
-        <div class="label">Saved</div>
+        <div class="label">Saved (sample)</div>
         <div class="figure savings">$55.32</div>
-        <div class="sub">57% lower. Same work delivered, same model quality.</div>
+        <div class="sub">Illustrative numbers from a single session. Your mileage varies with the work.</div>
       </div>
     </div>
   </div>
@@ -1357,12 +1357,12 @@
         <div class="v">116 min <small>7 turns</small></div>
       </div>
       <div class="report-stat">
-        <div class="k">Tokens</div>
-        <div class="v">552K <small>cache_read · 91% of input</small></div>
+        <div class="k">Tokens read from cache</div>
+        <div class="v">552K <small>across 7 API calls</small></div>
       </div>
       <div class="report-stat">
-        <div class="k">Cache hit</div>
-        <div class="v">96% <small>healthy — minimal context churn</small></div>
+        <div class="k">Cache hit rate</div>
+        <div class="v">96% <small>healthy &mdash; minimal context churn</small></div>
       </div>
     </div>
 
@@ -1523,8 +1523,8 @@
       <em>thermostat.</em>
     </div>
     <div class="footer-meta">
-      Single root commit · MIT-style use<br />
-      Built as a personal hook · shared as a public artifact.
+      MIT licensed.<br />
+      Built as a personal hook, kept small enough to read in one sitting.
     </div>
     <div class="footer-mid">— § —</div>
     <div class="footer-meta" style="text-align:right;">
