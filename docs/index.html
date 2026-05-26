@@ -1496,6 +1496,11 @@
         <td class="meaning">Antipattern detection (re-Read loops, repeat Bash, exploration grep-chains, subagent over-spawn). Set to 0 to disable.</td>
       </tr>
       <tr>
+        <td class="name">CLAUDE_THERMOSTAT_COST_MODE</td>
+        <td class="default"><span>api</span></td>
+        <td class="meaning"><code>api</code> includes <code>cache_read</code> at 0.1x input. <code>claude-code</code> excludes it, matching the cost Claude Code shows in its statusline (the right choice on Max, Pro, Team, or Enterprise plans). See the design note for the rationale.</td>
+      </tr>
+      <tr>
         <td class="name">CLAUDE_THERMOSTAT_WINDOW_SEC</td>
         <td class="default"><span>18000</span></td>
         <td class="meaning">Length of the rolling subscription window, in seconds. Default is 5h.</td>
@@ -1544,6 +1549,11 @@
     <div class="why-card">
       <h3>Why transcript parsing</h3>
       <p>Time and turn count are proxies for cost. Real token counts from the transcript give an actual cost estimate and — more importantly — the context window size, which is what determines whether <code>/compact</code> will meaningfully reduce future turns.</p>
+    </div>
+    <div class="why-card">
+      <h3>Why there are <em>two</em> cost modes</h3>
+      <p>Anthropic's API rate card bills <code>cache_read_input_tokens</code> at 0.1x the input rate. Claude Code's statusline reports a cost number that excludes <code>cache_read</code> entirely. For a cache-heavy session the two numbers can disagree by 2 or 3x.</p>
+      <p>Neither is wrong; they answer different questions. <code>api</code> mode tells you what raw API usage would cost on pay-as-you-go billing. <code>claude-code</code> mode tells you what Anthropic counts against your subscription, Team, or Enterprise plan. The default is <code>api</code> because under-reporting cost to an API user is financially harmful, while over-reporting to a subscription user is only confusing. Subscription users opt into <code>claude-code</code> mode explicitly.</p>
     </div>
     <div class="why-card">
       <h3>Why the subscription window is an <em>approximation</em></h3>

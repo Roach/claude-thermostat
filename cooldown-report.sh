@@ -60,6 +60,7 @@ from _lib import (
 
 path, session_id, reason, report_file, log_file = sys.argv[1:6]
 start_unix = int(sys.argv[6]) if len(sys.argv) > 6 else 0
+cost_mode = os.environ.get('CLAUDE_THERMOSTAT_COST_MODE', 'api')
 
 # Each `current` entry is (message.id, usage_dict). Claude Code re-appends
 # the same assistant message on every tool round-trip with the same msg id;
@@ -160,7 +161,7 @@ per_model_usd = Counter()
 total_in = total_cw = total_cr = total_out = 0
 for turn, model in zip(turns, model_per_turn):
     if not turn: continue
-    cost, inp, cw, cr, out = turn_cost_usd(turn, model)
+    cost, inp, cw, cr, out = turn_cost_usd(turn, model, mode=cost_mode)
     total_usd += cost
     per_model_usd[model] += cost
     total_in += inp; total_cw += cw; total_cr += cr; total_out += out
@@ -289,7 +290,12 @@ lines.append("")
 lines.append(f"- **Ended:** {datetime.now().isoformat(timespec='seconds')} (reason: {reason or 'unknown'})")
 lines.append(f"- **Duration:** {dur_min or 'unknown'}")
 lines.append(f"- **Turns:** {len(turns)}")
-lines.append(f"- **Cost:** ${total_usd:.2f}")
+cost_mode_label = (
+    "API rates (includes cache_read at 0.1x input)"
+    if cost_mode == 'api'
+    else "Claude Code display rates (cache_read excluded, matches statusline)"
+)
+lines.append(f"- **Cost:** ${total_usd:.2f}  _— {cost_mode_label}_")
 if per_model_usd:
     parts = ', '.join(f"{m.replace('claude-','')}=${c:.2f}" for m, c in per_model_usd.most_common() if round(c, 2) > 0)
     if parts:

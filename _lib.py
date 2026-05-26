@@ -59,12 +59,23 @@ def dedupe_turn(turn):
     return out
 
 
-def turn_cost_usd(turn, model_id):
+def turn_cost_usd(turn, model_id, mode='api'):
     """Bill a deduped turn against the given model's pricing.
 
-    `turn` is a list of (msg_id, usage) pairs. Each unique API call is
-    billed independently — cache_read counts on every call that hits cache,
-    because Anthropic charges for each cache_read on each request.
+    `turn` is a list of (msg_id, usage) pairs. Each unique API call is billed
+    independently. `mode` selects which billing model to use:
+
+      'api'         — public API pay-as-you-go rates. Includes cache_read at
+                      0.1x input. This is what Anthropic charges for raw API
+                      usage and what the published pricing pages reflect.
+
+      'claude-code' — matches the cost Claude Code displays in its statusline.
+                      Excludes cache_read entirely. For users on Max / Pro /
+                      Team / Enterprise plans this aligns with the number
+                      Anthropic counts against the plan.
+
+    Returns (cost, inp, cw, cr, out) — token counts are returned regardless
+    of mode so callers can still surface them in headers and reports.
     """
     p = lookup_pricing(model_id)
     usages = dedupe_turn(turn)
@@ -72,7 +83,8 @@ def turn_cost_usd(turn, model_id):
     cw  = sum(u.get('cache_creation_input_tokens', 0) for u in usages)
     cr  = sum(u.get('cache_read_input_tokens', 0) for u in usages)
     out = sum(u.get('output_tokens', 0) for u in usages)
-    cost = (inp * p[0] + cw * p[1] + cr * p[2] + out * p[3]) / 1_000_000
+    cr_cost = cr * p[2] if mode == 'api' else 0
+    cost = (inp * p[0] + cw * p[1] + cr_cost + out * p[3]) / 1_000_000
     return cost, inp, cw, cr, out
 
 

@@ -15,6 +15,12 @@
 #   CLAUDE_THERMOSTAT_COST_CENTS      5000  estimated cost in US cents ($50)
 #   CLAUDE_THERMOSTAT_CONTEXT_K       0     0 = disabled
 #   CLAUDE_THERMOSTAT_COOLDOWN_TURNS  10    turns between re-fires after first
+#   CLAUDE_THERMOSTAT_COST_MODE       api   'api' = include cache_read at 0.1x
+#                                            input (matches published Anthropic
+#                                            pricing). 'claude-code' = exclude
+#                                            cache_read (matches the cost
+#                                            Claude Code displays for users on
+#                                            Max / Pro / Team / Enterprise).
 #
 # Subscription-window approximation (local math, not a real quota read):
 #   CLAUDE_THERMOSTAT_WINDOW_SEC          18000  5h rolling window
@@ -61,6 +67,10 @@ COOLDOWN_TURNS="${CLAUDE_THERMOSTAT_COOLDOWN_TURNS:-10}"
 # Antipattern detection: fire the moment recurring waste is visible, even
 # if the dollar setpoint isn't hit yet.
 ANTIPATTERN_DETECT="${CLAUDE_THERMOSTAT_ANTIPATTERNS:-1}"     # 1 enables
+# 'api' bills cache_read at the published 0.1x input rate. 'claude-code'
+# excludes cache_read entirely, matching Claude Code's own cost number for
+# subscription / Team / Enterprise plans.
+COST_MODE="${CLAUDE_THERMOSTAT_COST_MODE:-api}"
 # Subscription-window approximation. Off by default; setpoint of 0 hides it
 # from the header so users on API billing don't see noise they don't need.
 WINDOW_SEC="${CLAUDE_THERMOSTAT_WINDOW_SEC:-18000}"           # 5h
@@ -122,7 +132,7 @@ PY
 # Only counts turns whose timestamp >= session_start so resumed sessions
 # don't accumulate cost from prior conversations in the same file.
 parse_transcript() {
-  /usr/bin/python3 - "$transcript_path" "$session_start" <<'PY'
+  /usr/bin/python3 - "$transcript_path" "$session_start" "$COST_MODE" <<'PY'
 import json, sys, os
 from collections import Counter
 sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
@@ -130,6 +140,7 @@ from _lib import is_real_user, in_session, turn_cost_usd, dedupe_turn
 
 path       = sys.argv[1]
 start_unix = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+cost_mode  = sys.argv[3] if len(sys.argv) > 3 else 'api'
 
 if not path or not os.path.exists(path):
     # cost_cents, context_k, primary_model, turns, cache_hit_pct
@@ -190,7 +201,7 @@ model_usd = Counter()
 for turn, model in zip(turns, turn_models):
     if not turn:
         continue
-    cost, inp, cw, cr, out = turn_cost_usd(turn, model)
+    cost, inp, cw, cr, out = turn_cost_usd(turn, model, mode=cost_mode)
     total_cost_usd += cost
     model_usd[model] += cost
     total_cr += cr
