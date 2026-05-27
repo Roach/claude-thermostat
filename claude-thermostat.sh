@@ -118,13 +118,43 @@ PY
 write_state() {
   SS="$1" TC="$2" LNT="$3" NC="$4" /usr/bin/python3 - "$state_file" <<'PY'
 import json, os, sys
+p = sys.argv[1]
+existing = {}
+if os.path.exists(p):
+    try:
+        existing = json.load(open(p))
+    except Exception:
+        pass
 d = {
     'session_start':  int(os.environ['SS']),
     'turn_count':     int(os.environ['TC']),
     'last_nag_turn':  int(os.environ['LNT']),
     'nag_count':      int(os.environ['NC']),
+    'nag_history':    existing.get('nag_history', []),
 }
-json.dump(d, open(sys.argv[1], 'w'))
+json.dump(d, open(p, 'w'))
+PY
+}
+
+# Appends one nag event to nag_history in the state file.
+# Called only when the alert actually fires, after write_state sets the scalar fields.
+append_nag_event() {
+  TURN="$1" COST="$2" CTX_K="$3" TRIGGERS="$4" /usr/bin/python3 - "$state_file" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+try:
+    d = json.load(open(p)) if os.path.exists(p) else {}
+except Exception:
+    d = {}
+hist = d.get('nag_history', [])
+hist.append({
+    'turn':       int(os.environ['TURN']),
+    'cost_cents': int(os.environ['COST']),
+    'context_k':  int(os.environ['CTX_K']),
+    'triggers':   [t.strip() for t in os.environ['TRIGGERS'].split(',') if t.strip()],
+})
+d['nag_history'] = hist
+json.dump(d, open(p, 'w'))
 PY
 }
 
@@ -440,6 +470,7 @@ elapsed=$(( now - session_start ))
 mins=$(( elapsed / 60 ))
 should_nag=0
 reasons=""
+trigger_types=""   # comma-separated: cost,antipattern,time,turns,context,cache_hit,cache_drop,window
 
 # Pre-format the cost so the header can show it whether or not cost is what
 # triggered the nag.
@@ -449,15 +480,19 @@ cost_display=$(COST_CENTS="${cost_cents:-0}" /usr/bin/python3 -c \
 # Cost: the canonical trigger. $50 default, raise via env if you want quieter.
 if [ "$cost_cents" -ge "$COST_THRESH" ]; then
   should_nag=1
+  trigger_types+="cost,"
   reasons+="  •  estimated session cost: ${cost_display}"$'\n'
 fi
 
 # Antipattern triggers fire regardless of cost — catch waste while it's cheap.
+has_grep_antipattern=0
 if [ "$ANTIPATTERN_DETECT" = "1" ]; then
   while IFS= read -r ap_reason; do
     [ -z "$ap_reason" ] && continue
     should_nag=1
+    trigger_types+="antipattern,"
     reasons+="  •  antipattern: ${ap_reason}"$'\n'
+    echo "$ap_reason" | grep -q "Grep/Read/Glob" && has_grep_antipattern=1
   done < <(detect_antipatterns)
 fi
 
@@ -466,19 +501,23 @@ fi
 # nudge in addition to (or instead of) the cost setpoint.
 if [ "$TIME_THRESH" -gt 0 ] && [ "$elapsed" -ge "$TIME_THRESH" ]; then
   should_nag=1
+  trigger_types+="time,"
   reasons+="  •  session is ${mins} min old"$'\n'
 fi
 if [ "$TURNS_THRESH" -gt 0 ] && [ "$turn_count" -ge "$TURNS_THRESH" ]; then
   should_nag=1
+  trigger_types+="turns,"
   reasons+="  •  ${turn_count} turns completed this session"$'\n'
 fi
 if [ "$CONTEXT_THRESH_K" -gt 0 ] && [ "${context_k:-0}" -ge "$CONTEXT_THRESH_K" ]; then
   should_nag=1
+  trigger_types+="context,"
   reasons+="  •  last-turn input context: ~${context_k}K tokens (each turn now costs more)"$'\n'
 fi
 # Cache hit rate: opt-in setpoint; fire when session average drops below threshold.
 if [ "$CACHE_HIT_THRESH" -gt 0 ] && [ "$tx_turns" -ge 3 ] && [ "${cache_hit_pct:-0}" -lt "$CACHE_HIT_THRESH" ]; then
   should_nag=1
+  trigger_types+="cache_hit,"
   reasons+="  •  session cache hit rate: ${cache_hit_pct}% — below the ${CACHE_HIT_THRESH}% setpoint; most input is paying full price each turn"$'\n'
 fi
 # Per-turn cache drop: always-on, no setpoint needed. A 30+ point drop on the
@@ -487,11 +526,13 @@ if [ "$tx_turns" -gt 3 ] && [ "${cache_hit_pct:-0}" -gt 50 ]; then
   drop=$(( ${cache_hit_pct:-0} - ${last_turn_cache_hit:-0} ))
   if [ "$drop" -ge 30 ]; then
     should_nag=1
+    trigger_types+="cache_drop,"
     reasons+="  •  cache dropped ${drop}pp this turn (session avg ${cache_hit_pct}% → last turn ${last_turn_cache_hit}%) — context was reshuffled; likely: model switch, new large file auto-loaded, or /compact"$'\n'
   fi
 fi
 if [ "$WINDOW_TOKENS_THRESH" -gt 0 ] && [ "$window_tokens_total" -ge "$WINDOW_TOKENS_THRESH" ]; then
   should_nag=1
+  trigger_types+="window,"
   window_hours=$(( WINDOW_SEC / 3600 ))
   reasons+="  •  ${window_tokens_display} tokens used in the last ${window_hours}h (local approx; not a real quota read)"$'\n'
 fi
@@ -516,37 +557,45 @@ if [ "$WINDOW_TOKENS_THRESH" -gt 0 ] && [ -n "$window_tokens_display" ]; then
   header+=" · ${window_tokens_display} tok/${window_hours}h"
 fi
 
-# Context-sensitive suggestions: lead with what's most useful given triggers.
-suggestions=""
-if [ "${context_k:-0}" -ge "${CONTEXT_THRESH_K:-80}" ]; then
-  suggestions+="  →  \`/compact\` — summarizes history and shrinks the context window; best option when context is large and the task is ongoing"$'\n'
-  suggestions+="  →  Delegate exploratory work to a subagent (Task tool) — the subagent's tool output stays out of the main context, so reads/greps don't keep growing your bill on every subsequent turn"$'\n'
+# Build options list for ask_followup_question.
+# /compact and subagent are shown when context is non-trivial (context_k > 0
+# when CONTEXT_THRESH_K=0, meaning always — same gate as before).
+options=""
+if [ "${context_k:-0}" -ge "${CONTEXT_THRESH_K:-0}" ]; then
+  options+='"/compact — shrink context (best when task is ongoing)"'$'\n'
+  if [ "$has_grep_antipattern" -eq 1 ]; then
+    options+='"Delegate to a subagent — keeps exploration out of main context"'$'\n'
+  fi
 fi
 case "$model" in
   claude-opus-*)
-    suggestions+="  →  \`/model sonnet\` — Opus input is 5× Sonnet (\$15 vs \$3 per M tokens) and output is 5× (\$75 vs \$15); switch unless this turn really needs Opus reasoning"$'\n'
+    options+='"/model sonnet — 5× cheaper; switch for routine turns"'$'\n'
     ;;
 esac
-suggestions+="  →  \`/clear\` — wipe context entirely and start fresh; good when pivoting to a new task"$'\n'
-suggestions+="  →  Close and reopen — lowest-cost baseline; use when this task is done or you want a clean slate"$'\n'
-suggestions+="  →  Continue — if you're nearly done and want to push through"$'\n'
+options+='"/clear — fresh start (best when pivoting tasks)"'$'\n'
+options+='"Continue"'$'\n'
 
-# One-time structural advice on the first nag of the session: most expensive
-# sessions are expensive every turn because too much auto-loads into context.
+# Structural note shown once after the user responds on the first nag.
+structural_note=""
 if [ "$nag_count" -eq 1 ]; then
-  suggestions+=""$'\n'
-  suggestions+="Structural fixes worth doing once (apply between sessions, not now):"$'\n'
-  suggestions+="  →  Audit \`~/.claude/rules/\` + project \`.claude/rules/\` — convert big reference docs to on-demand skills (\`~/.claude/skills/\`) so they only load when invoked. Anthropic guidance: rules trigger on file patterns, skills trigger on intent"$'\n'
-  suggestions+="  →  Narrow rule globs to the directories that actually need them (e.g. \`**/{routes,api}/**\` instead of \`**/*.ts\`) — fewer rules auto-load on each turn"$'\n'
+  structural_note="After the user responds, add one brief note: audit \`~/.claude/rules/\` for large docs that could be skills (\`~/.claude/skills/\`), and narrow rule globs to directories that need them."
 fi
 
 msg="🌡  ${header}"$'\n'
 msg+="${reasons}"$'\n'
-msg+="Tell the user and ask them what they'd like to do:"$'\n'
-msg+="${suggestions}"
-msg+="Acknowledge their choice and proceed. Don't fire again unless setpoints are crossed again."
+msg+="Present this to the user using the ask_followup_question tool — call it directly, do not narrate first."$'\n'
+msg+=$'\n'
+msg+="Options:"$'\n'
+msg+="${options}"
+if [ -n "$structural_note" ]; then
+  msg+=$'\n'
+  msg+="${structural_note}"$'\n'
+fi
+msg+=$'\n'
+msg+="After the user responds, execute their choice. Don't fire again unless setpoints are crossed again."
 
 write_state "$session_start" "$turn_count" "$turn_count" "$nag_count"
+append_nag_event "$turn_count" "${cost_cents:-0}" "${context_k:-0}" "$trigger_types"
 
 printf '%s\n' "$msg" 1>&2
 exit 2

@@ -33,8 +33,7 @@ input="$(cat)"
 [ -z "$session_id" ] && exit 0
 { [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; } && exit 0
 
-# Read session_start from state file so we only analyze the current session's
-# turns (not prior sessions that share the same transcript file).
+# Read session_start and nag_history from state file.
 state_file="$STATE_DIR/${session_id}.json"
 session_start=0
 if [ -f "$state_file" ]; then
@@ -42,12 +41,14 @@ if [ -f "$state_file" ]; then
     "import json,os; d=json.load(open(os.environ['STATE_FILE'])); print(d.get('session_start',0))" 2>/dev/null || echo 0)
 fi
 
+TUNING_FILE="$STATE_DIR/tuning.json"
+
 # Use the pre-session path exported by the shell wrapper if available; this
 # lets the wrapper print the exact file without any age-based guessing.
 REPORT_FILE="${CLAUDE_COOLDOWN_FILE:-$REPORT_DIR/${session_id}.md}"
 mkdir -p "$(dirname "$REPORT_FILE")"
 
-/usr/bin/python3 - "$transcript_path" "$session_id" "$reason" "$REPORT_FILE" "$LOG" "$session_start" <<'PY'
+/usr/bin/python3 - "$transcript_path" "$session_id" "$reason" "$REPORT_FILE" "$LOG" "$session_start" "$state_file" "$TUNING_FILE" <<'PY'
 import json, os, sys, re
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -59,7 +60,9 @@ from _lib import (
 )
 
 path, session_id, reason, report_file, log_file = sys.argv[1:6]
-start_unix = int(sys.argv[6]) if len(sys.argv) > 6 else 0
+start_unix  = int(sys.argv[6]) if len(sys.argv) > 6 else 0
+state_file  = sys.argv[7] if len(sys.argv) > 7 else ''
+tuning_file = sys.argv[8] if len(sys.argv) > 8 else ''
 cost_mode = os.environ.get('CLAUDE_THERMOSTAT_COST_MODE', 'api')
 
 # Each `current` entry is (message.id, usage_dict). Claude Code re-appends
@@ -329,6 +332,118 @@ if turns and turns[-1]:
             f"Final context was {last_ctx//1000}K tokens with no subagent use. Heavy exploration in the main thread keeps tool output in scope on every later turn — delegate to a subagent so the noise stays out"
         ))
 
+# --- tuning: update cross-session history and detect config patterns -----------
+
+def _load_tuning(path):
+    if not path or not os.path.exists(path):
+        return {'sessions': []}
+    try:
+        return json.load(open(path))
+    except Exception:
+        return {'sessions': []}
+
+def _save_tuning(path, data, max_sessions=20):
+    if not path:
+        return
+    data['sessions'] = data['sessions'][-max_sessions:]
+    try:
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+# Read nag_history from the session state file.
+nag_history = []
+if state_file and os.path.exists(state_file):
+    try:
+        nag_history = json.load(open(state_file)).get('nag_history', [])
+    except Exception:
+        pass
+
+# Append this session to the tuning log.
+tuning = _load_tuning(tuning_file)
+nag_count_session = len(nag_history)
+tuning['sessions'].append({
+    'session_id': session_id,
+    'date':       datetime.now().date().isoformat(),
+    'cost_cents': int(round(total_usd * 100)),
+    'nag_count':  nag_count_session,
+    'nag_history': nag_history,
+})
+_save_tuning(tuning_file, tuning)
+
+def _tuning_suggestions(sessions, cost_thresh_cents):
+    """Detect config patterns across recent sessions and return suggestion strings."""
+    suggs = []
+    nagged = [s for s in sessions if s.get('nag_count', 0) > 0]
+    recent = sessions[-10:]
+    recent_nagged = [s for s in recent if s.get('nag_count', 0) > 0]
+
+    if len(sessions) < 3:
+        return suggs   # not enough data yet
+
+    # 1. Setpoint calibration: user routinely keeps going past the alert.
+    #    Signal: session end-cost is ≥1.5× the cost at first nag, across ≥3 sessions.
+    overruns = []
+    for s in recent_nagged[-6:]:
+        hist = s.get('nag_history') or []
+        if hist and s['cost_cents'] > 0:
+            first_nag = hist[0]['cost_cents']
+            if first_nag > 0:
+                overruns.append(s['cost_cents'] / first_nag)
+    if len(overruns) >= 3 and sum(overruns) / len(overruns) >= 1.5:
+        avg_end = int(sum(s['cost_cents'] for s in recent_nagged[-6:]) / len(recent_nagged[-6:]))
+        suggested = int(avg_end * 0.8)   # 80% of typical end cost → fires a bit earlier
+        current_dollars = cost_thresh_cents / 100
+        suggs.append(
+            f"You typically continue well past the alert (avg session cost "
+            f"${avg_end/100:.0f} vs ${current_dollars:.0f} setpoint). "
+            f"Consider `CLAUDE_THERMOSTAT_COST_CENTS={suggested}` to catch it "
+            f"earlier, or raise the setpoint to reduce noise."
+        )
+
+    # 2. Context setpoint: context is large at most nag events.
+    nag_ctxs = [n['context_k'] for s in recent for n in (s.get('nag_history') or []) if n.get('context_k', 0) > 0]
+    if len(nag_ctxs) >= 4:
+        above_100 = sum(1 for k in nag_ctxs if k >= 100)
+        if above_100 / len(nag_ctxs) >= 0.6:
+            median_ctx = sorted(nag_ctxs)[len(nag_ctxs) // 2]
+            suggs.append(
+                f"Context is above 100K tokens at alert time in "
+                f"{above_100}/{len(nag_ctxs)} recent nags (median {median_ctx}K). "
+                f"Enable `CLAUDE_THERMOSTAT_CONTEXT_K=90` to catch it earlier, "
+                f"when `/compact` recovers more context."
+            )
+
+    # 3. Persistent antipatterns: antipatterns dominate triggers across sessions.
+    all_triggers = [t for s in recent for n in (s.get('nag_history') or []) for t in n.get('triggers', [])]
+    if len(all_triggers) >= 5:
+        ap_share = sum(1 for t in all_triggers if t == 'antipattern') / len(all_triggers)
+        if ap_share >= 0.6:
+            suggs.append(
+                f"Antipatterns trigger {int(ap_share*100)}% of your alerts across recent "
+                f"sessions — the patterns aren't improving. Consider installing the "
+                f"Auggie MCP (`mcp__auggie__codebase-retrieval`) as your primary "
+                f"codebase search: one call replaces most Grep/Read chains."
+            )
+
+    # 4. Alert fatigue: 3+ nags per nagged session on average.
+    if len(recent_nagged) >= 3:
+        avg_nags = sum(s['nag_count'] for s in recent_nagged) / len(recent_nagged)
+        if avg_nags >= 3:
+            suggs.append(
+                f"You average {avg_nags:.1f} alerts per session. If the alerts feel "
+                f"noisy, raise `CLAUDE_THERMOSTAT_COOLDOWN_TURNS` (currently the "
+                f"default 10) to widen the deadband, or increase the cost setpoint."
+            )
+
+    return suggs
+
+cost_thresh_env = int(os.environ.get('CLAUDE_THERMOSTAT_COST_CENTS') or 5000)
+tuning_suggs = _tuning_suggestions(tuning['sessions'], cost_thresh_env)
+
 # --- write report ---
 lines = []
 lines.append(f"# Cooldown report — {session_id}")
@@ -428,6 +543,24 @@ if window_thresh > 0:
             lines.append(f"- `{m}` — {format_token_count(n)} tokens")
     lines.append("")
 
+# Configuration tuning suggestions (cross-session patterns, ≥3 sessions required)
+if tuning_suggs:
+    lines.append("## Configuration tuning")
+    lines.append("")
+    lines.append("_Based on patterns across your recent sessions:_")
+    lines.append("")
+    for s in tuning_suggs:
+        lines.append(f"- {s}")
+    lines.append("")
+
+# "Review with Claude" command — short copyable one-liner at the bottom of the report.
+lines.append("## Review with Claude")
+lines.append("")
+lines.append("```bash")
+lines.append(f'claude "Review my thermostat cooldown report at {report_file} and help me apply the top suggestion"')
+lines.append("```")
+lines.append("")
+
 # Tool histogram (informational tail)
 if tool_calls:
     lines.append("## Tool histogram")
@@ -474,7 +607,12 @@ if suggestions:
             print(f"    • {s}", file=sys.stderr)
 else:
     print("  No notable inefficiencies detected.", file=sys.stderr)
+if tuning_suggs:
+    print(f"\n  Configuration tuning ({len(tuning['sessions'])} sessions on record):", file=sys.stderr)
+    for s in tuning_suggs:
+        print(f"    ◆ {s}", file=sys.stderr)
 print(f"\n  Full report: {report_file}", file=sys.stderr)
+print(f"  Review with Claude: claude \"Review my thermostat cooldown report at {report_file} and help me apply the top suggestion\"", file=sys.stderr)
 print('━' * 60, file=sys.stderr)
 PY
 
