@@ -935,8 +935,8 @@
       <span>currently reading <b id="topbar-cost" style="color:var(--ink);font-weight:500;">$0.00</b></span>
     </div>
     <nav class="top-links">
+      <a href="#skills">Skills</a>
       <a href="#install">Install</a>
-      <a href="#anatomy">Anatomy</a>
       <a href="https://github.com/Roach/claude-thermostat" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
   </div>
@@ -1030,7 +1030,7 @@
     <div><span class="k">Event</span><span class="v">Stop / SessionEnd</span></div>
     <div><span class="k">Cost source</span><span class="v">Transcript JSONL</span></div>
     <div><span class="k">Models priced</span><span class="v">Opus · Sonnet · Haiku</span></div>
-    <div><span class="k">Footprint</span><span class="v">3 shell scripts · 1 py lib</span></div>
+    <div><span class="k">Footprint</span><span class="v">5 scripts · 2 skills · 1 py lib</span></div>
   </div>
 </section>
 
@@ -1399,11 +1399,88 @@
 </section>
 
 <!-- ======================================================= -->
+<!-- SKILLS: ON-DEMAND + WEEKLY TREND                        -->
+<!-- ======================================================= -->
+<section id="skills">
+  <div class="section-head">
+    <div class="left">§ 05 · skills</div>
+    <h2>Ask anytime, <em>on demand.</em></h2>
+  </div>
+
+  <p style="max-width:62ch; margin: 0 0 clamp(32px,5vw,56px); color:var(--ink-soft); font-size:clamp(16px,1.3vw,19px); line-height:1.5;">
+    Two Claude Code skills let you query thermostat data mid-session, without waiting for a setpoint to trip. Symlink the skill files into <code class="mono" style="font-size:0.85em;background:var(--paper-deep);padding:1px 6px;border-radius:2px;">~/.claude/skills/</code> and they become slash commands in every session.
+  </p>
+
+  <div class="demo-grid">
+    <div class="panel">
+      <div class="panel-header">
+        <span><span class="dot"></span>/thermostat · current session</span>
+        <span>thermostat-status.sh</span>
+      </div>
+      <div class="panel-body">
+<span class="alert-line header">thermostat status · session c940239e</span>
+<span class="alert-line" style="display:block;height:8px;"></span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Turns:     15</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Age:       44 min</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Cost:      $0.63  (subscription-estimated)</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Context:   139K tokens  (last turn)</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Cache hit: 97% session avg, 100% last turn</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Model:     sonnet-4-6</span>
+<span class="alert-line" style="display:block;height:8px;"></span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Tokens:    in=64  cw=85K  cr=2.8M  out=21K</span>
+      </div>
+    </div>
+
+    <div class="demo-caption">
+      <h3>Pull, not push.</h3>
+      <p>
+        The Stop hook alerts you when a threshold trips. The skill answers your question whenever you ask — useful mid-session when you want to know where you stand without waiting for the setpoint.
+      </p>
+      <p>
+        Powered by <span class="kbd">thermostat-status.sh</span>: the same transcript parser as the hook, wired to a read-only status query with no side effects.
+      </p>
+    </div>
+  </div>
+
+  <div class="demo-grid" style="margin-top:clamp(40px,6vw,72px);">
+    <div class="panel">
+      <div class="panel-header">
+        <span><span class="dot" style="background:var(--cool);box-shadow:0 0 0 3px color-mix(in srgb,var(--cool) 25%,transparent);"></span>/thermostat-week · 7-day trend</span>
+        <span>weekly-trend.sh</span>
+      </div>
+      <div class="panel-body">
+<span class="alert-line header" style="color:var(--cool-bright);">thermostat weekly trend · 7 days ending 2026-05-26</span>
+<span class="alert-line" style="display:block;height:6px;"></span>
+<span class="alert-line" style="display:block;color:var(--ink-mute);padding-left:2px;font-size:11px;">Date         Sessions   Cost     Turns  Top suggestions</span>
+<span class="alert-line" style="display:block;color:var(--rule-soft);padding-left:2px;">──────────────────────────────────────────────</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">2026-05-26        9  $182.51    261  skill(2), model(1)</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">2026-05-25        5   $91.20    142  context(2)</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">2026-05-23        2   $25.13     62  —</span>
+<span class="alert-line" style="display:block;color:var(--rule-soft);padding-left:2px;">──────────────────────────────────────────────</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">Total            16  $298.84    465</span>
+<span class="alert-line" style="display:block;height:8px;"></span>
+<span class="alert-line" style="display:block;color:var(--ink-mute);padding-left:2px;font-size:11px;">Recurring: skill(2), context(2), model(1)</span>
+      </div>
+    </div>
+
+    <div class="demo-caption">
+      <h3>Per-session → per-week.</h3>
+      <p>
+        Cooldown reports accumulate in <span class="kbd">~/.claude/thermostat/reports/</span>. The weekly trend reads them all and shows which suggestion categories keep recurring — the ones worth fixing structurally, not just session-to-session.
+      </p>
+      <p>
+        Runs standalone too: <span class="kbd">./weekly-trend.sh 14</span> for a fortnight, or <span class="kbd">./weekly-trend.sh --markdown</span> for a GitHub-flavored table.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
 <!-- INSTALL                                                 -->
 <!-- ======================================================= -->
 <section id="install">
   <div class="section-head">
-    <div class="left">§ 05 · install</div>
+    <div class="left">§ 06 · install</div>
     <h2>Wire it up <em>once.</em></h2>
   </div>
 
@@ -1420,6 +1497,10 @@
       <div class="step">
         <h3>Optional: set your setpoint</h3>
         <p>Drop a config file at <code>~/.claude/thermostat/config.env</code>, or set <code>CLAUDE_THERMOSTAT_COST_CENTS</code> in your shell. Default is $50.</p>
+      </div>
+      <div class="step">
+        <h3>Optional: install the skills</h3>
+        <p>Symlink the two skill files into <code>~/.claude/skills/</code> to enable <code>/thermostat</code> (live status) and <code>/thermostat-week</code> (7-day trend) as slash commands in any session.</p>
       </div>
     </div>
 
@@ -1443,6 +1524,13 @@
 <span class="c-fn">CLAUDE_THERMOSTAT_COST_CENTS</span>=<span class="c-em">3000</span>     <span class="c-cmt"># fire at $30 instead of $50</span>
 <span class="c-fn">CLAUDE_THERMOSTAT_COOLDOWN_TURNS</span>=<span class="c-em">15</span>
 <span class="c-fn">CLAUDE_THERMOSTAT_CONTEXT_K</span>=<span class="c-em">120</span>      <span class="c-cmt"># also fire above 120K context</span></pre>
+<br />
+<pre class="code"><span class="tag">optional: skill symlinks</span><span class="c-cmt"># Enable /thermostat and /thermostat-week slash commands.</span>
+<span class="c-fn">mkdir</span> -p ~/.claude/skills
+<span class="c-fn">ln</span> -s <span class="c-em">/abs/path/to/</span>claude-thermostat/skills/thermostat.md \
+       ~/.claude/skills/thermostat.md
+<span class="c-fn">ln</span> -s <span class="c-em">/abs/path/to/</span>claude-thermostat/skills/thermostat-week.md \
+       ~/.claude/skills/thermostat-week.md</pre>
     </div>
   </div>
 </section>
@@ -1452,7 +1540,7 @@
 <!-- ======================================================= -->
 <section class="config-section">
   <div class="section-head">
-    <div class="left">§ 06 · controls</div>
+    <div class="left">§ 07 · controls</div>
     <h2>Every dial, <em>labeled.</em></h2>
   </div>
 
@@ -1534,7 +1622,7 @@
 <!-- ======================================================= -->
 <section id="why">
   <div class="section-head">
-    <div class="left">§ 07 · design notes</div>
+    <div class="left">§ 08 · design notes</div>
     <h2>Why it works <em>this way.</em></h2>
   </div>
 

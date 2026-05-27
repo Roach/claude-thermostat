@@ -22,8 +22,13 @@ When the cost setpoint is crossed (or an antipattern is detected — see below),
 
 - `claude-thermostat.sh` — the in-session alert, wired to `Stop`
 - `cooldown-report.sh` — the post-session cost-reduction post-mortem, wired to `SessionEnd`
+- `thermostat-status.sh` — on-demand status query; used by the `/thermostat` skill
+- `weekly-trend.sh` — 7-day (or N-day) cost/antipattern trend from cooldown reports
 - `print-latest-cooldown.sh` — optional terminal pretty-printer for the report (call from a `claude` shell wrapper after the process exits)
 - `_lib.py` — shared pricing, dedup, and session-filter helpers
+- `skills/thermostat.md` — Claude Code skill for `/thermostat`
+- `skills/thermostat-week.md` — Claude Code skill for `/thermostat-week`
+- `docs/report-format.md` — stable format spec for `reports.log` and cooldown report files
 
 ## Session state
 
@@ -155,6 +160,77 @@ What it can't tell you:
 - Usage from `claude.ai`, direct API calls, or anything else not written to `~/.claude/projects/`.
 
 State for the window scan lives at `~/.claude/thermostat/window-index.json`. Safe to delete; it rebuilds on the next invocation (will re-scan transcript tails up to the configured max age).
+
+## On-demand status (`/thermostat` skill)
+
+`thermostat-status.sh` queries the current session without waiting for a threshold to fire. It reads the most recently modified state file in `~/.claude/thermostat/` and parses the corresponding transcript:
+
+```
+thermostat status · session a1b2c3d4
+
+  Turns:     12
+  Age:       28 min
+  Cost:      $0.47  (subscription-estimated)
+  Context:   43K tokens  (last turn)
+  Cache hit: 78% session avg, 72% last turn
+  Model:     sonnet-4-6
+
+  Tokens:    in=142K  cw=12K  cr=438K  out=18K
+```
+
+A cache-drop warning appears when the most recent turn dropped ≥30pp below the session average.
+
+### Install the skill
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s /path/to/claude-thermostat/skills/thermostat.md ~/.claude/skills/thermostat.md
+```
+
+Then type `/thermostat` in any Claude Code session. Claude will run the status script and summarize the output. The skill resolves the script via `$THERMOSTAT_DIR`, then PATH, then a `find` fallback.
+
+Optionally set `THERMOSTAT_DIR` in your shell config so the skill always finds the script:
+
+```sh
+export THERMOSTAT_DIR="$HOME/path/to/claude-thermostat"
+```
+
+## Weekly trend (`/thermostat-week` skill)
+
+`weekly-trend.sh` reads `~/.claude/thermostat/reports.log` and the individual report files to produce a day-by-day summary of sessions, cost, turns, and recurring suggestion categories:
+
+```
+thermostat weekly trend · 7 days ending 2026-05-26
+
+Date           Sessions   Cost    Turns  Top suggestions
+──────────────────────────────────────────────────────────
+2026-05-26            3  $12.40      45  skill(2), context(1)
+2026-05-25            5   $8.20      72  model(3), skill(1)
+──────────────────────────────────────────────────────────
+Total                 8  $20.60     117
+
+Recurring suggestions: skill(3), model(3), context(1)
+```
+
+Run directly from a terminal:
+
+```bash
+./weekly-trend.sh          # last 7 days
+./weekly-trend.sh 14       # last 14 days
+./weekly-trend.sh --markdown   # GitHub-flavored markdown output
+```
+
+### Install the skill
+
+```bash
+ln -s /path/to/claude-thermostat/skills/thermostat-week.md ~/.claude/skills/thermostat-week.md
+```
+
+Then type `/thermostat-week` in any session. Pass a day count or `--markdown` in your message and the skill forwards it to the script.
+
+## Report format
+
+`reports.log` and cooldown report files follow a documented, stable format intended for external parsing (rollup scripts, scheduled agents). See [`docs/report-format.md`](docs/report-format.md) for the full spec, including a parsing regex for log lines and the list of stable suggestion-category headings.
 
 ## Manual test
 
