@@ -65,14 +65,18 @@ def turn_cost_usd(turn, model_id, mode='api'):
     `turn` is a list of (msg_id, usage) pairs. Each unique API call is billed
     independently. `mode` selects which billing model to use:
 
-      'api'         — public API pay-as-you-go rates. Includes cache_read at
-                      0.1x input. This is what Anthropic charges for raw API
-                      usage and what the published pricing pages reflect.
+      'api'          — public API pay-as-you-go rates. Includes cache_read at
+                       0.1x input. This is what Anthropic charges for raw API
+                       usage and what the published pricing pages reflect.
 
-      'claude-code' — matches the cost Claude Code displays in its statusline.
-                      Excludes cache_read entirely. For users on Max / Pro /
-                      Team / Enterprise plans this aligns with the number
-                      Anthropic counts against the plan.
+      'subscription' — matches the cost Claude Code displays in its statusline.
+                       Excludes cache_read entirely. For users on Max / Pro /
+                       Team / Enterprise plans this aligns with the number
+                       Anthropic counts against the plan. The dollar figure
+                       produced is an API-equivalent estimate, not actual
+                       charges (subscription users are not billed per-token).
+
+      'claude-code'  — accepted as an alias for 'subscription' (legacy name).
 
     Returns (cost, inp, cw, cr, out) — token counts are returned regardless
     of mode so callers can still surface them in headers and reports.
@@ -83,6 +87,8 @@ def turn_cost_usd(turn, model_id, mode='api'):
     cw  = sum(u.get('cache_creation_input_tokens', 0) for u in usages)
     cr  = sum(u.get('cache_read_input_tokens', 0) for u in usages)
     out = sum(u.get('output_tokens', 0) for u in usages)
+    # 'subscription' and its legacy alias 'claude-code' both drop cache_read;
+    # only 'api' bills it at the 0.1x input rate.
     cr_cost = cr * p[2] if mode == 'api' else 0
     cost = (inp * p[0] + cw * p[1] + cr_cost + out * p[3]) / 1_000_000
     return cost, inp, cw, cr, out

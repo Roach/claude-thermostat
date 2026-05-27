@@ -1058,7 +1058,7 @@
       <div class="part-num">§ 01.a</div>
       <div class="part-name">Setpoint</div>
       <div class="part-real mono">$CLAUDE_THERMOSTAT_COST_CENTS</div>
-      <p class="part-desc">The dollar ceiling you're willing to spend before being interrupted. Defaults to $50, raise or lower it to suit. The only setpoint enabled by default. Time, turns, context size, and a rolling subscription-window token sum are available as opt-in.</p>
+      <p class="part-desc">The dollar ceiling you're willing to spend before being interrupted. Defaults to $50, raise or lower it to suit. The only setpoint enabled by default. Time, turns, context size, and a rolling subscription-window token sum are available as opt-in. A sudden per-turn cache drop (&ge;30pp below the session average) is detected as an always-on trigger without a setpoint &mdash; it flags a context reshuffle that just made the next turn much more expensive.</p>
     </div>
 
     <!-- SENSOR -->
@@ -1486,6 +1486,11 @@
         <td class="meaning">Last-turn input-context trigger, in thousands of tokens. Useful for getting nudged toward <code>/compact</code> before each new turn pays for the whole window.</td>
       </tr>
       <tr>
+        <td class="name">CLAUDE_THERMOSTAT_CACHE_HIT_MIN</td>
+        <td class="default"><span>0</span></td>
+        <td class="meaning">Cache-hit-% setpoint; fires when the session cache hit rate falls below this value (requires &ge;3 turns). <code>0</code> disables.</td>
+      </tr>
+      <tr>
         <td class="name">CLAUDE_THERMOSTAT_COOLDOWN_TURNS</td>
         <td class="default"><span>10</span></td>
         <td class="meaning">Hysteresis. After firing, the alert won't fire again for this many turns of actual work.</td>
@@ -1498,7 +1503,7 @@
       <tr>
         <td class="name">CLAUDE_THERMOSTAT_COST_MODE</td>
         <td class="default"><span>api</span></td>
-        <td class="meaning"><code>api</code> includes <code>cache_read</code> at 0.1x input. <code>claude-code</code> excludes it, matching the cost Claude Code shows in its statusline (the right choice on Max, Pro, Team, or Enterprise plans). See the design note for the rationale.</td>
+        <td class="meaning"><code>api</code> includes <code>cache_read</code> at 0.1x input. <code>subscription</code> (alias: <code>claude-code</code>) is the preferred name; it excludes <code>cache_read</code>, matching the cost Claude Code shows in its statusline (the right choice on Max, Pro, Team, or Enterprise plans). See the design note for the rationale.</td>
       </tr>
       <tr>
         <td class="name">CLAUDE_THERMOSTAT_WINDOW_SEC</td>
@@ -1553,7 +1558,7 @@
     <div class="why-card">
       <h3>Why there are <em>two</em> cost modes</h3>
       <p>Anthropic's API rate card bills <code>cache_read_input_tokens</code> at 0.1x the input rate. Claude Code's statusline reports a cost number that excludes <code>cache_read</code> entirely. For a cache-heavy session the two numbers can disagree by 2 or 3x.</p>
-      <p>Neither is wrong; they answer different questions. <code>api</code> mode tells you what raw API usage would cost on pay-as-you-go billing. <code>claude-code</code> mode tells you what Anthropic counts against your subscription, Team, or Enterprise plan. The default is <code>api</code> because under-reporting cost to an API user is financially harmful, while over-reporting to a subscription user is only confusing. Subscription users opt into <code>claude-code</code> mode explicitly.</p>
+      <p>Neither is wrong; they answer different questions. <code>api</code> mode tells you what raw API usage would cost on pay-as-you-go billing. <code>subscription</code> mode (alias: <code>claude-code</code>, kept for backwards compatibility) produces an <em>API-equivalent estimate</em> &mdash; not the actual quota metric Anthropic uses. Subscription users aren't billed per-token, and the subscription quota formula isn't documented; the figure is useful for orientation and comparison with the statusline, but for real quota tracking use <code>CLAUDE_THERMOSTAT_WINDOW_TOKENS</code>. The default is <code>api</code> because under-reporting cost to an API user is financially harmful, while over-reporting to a subscription user is only confusing. Subscription users opt into <code>subscription</code> mode explicitly.</p>
     </div>
     <div class="why-card">
       <h3>Why the subscription window is an <em>approximation</em></h3>

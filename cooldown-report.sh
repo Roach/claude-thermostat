@@ -249,14 +249,39 @@ if opus_turns and per_model_usd:
             ))
 
 # 5) Cache hit rate — low cache_read ratio means context churn (rules
-#    reshuffling, lots of /clear), each turn pays full input.
+#    reshuffling, lots of /clear), each turn pays full input. Try to name
+#    the specific cause rather than listing generic possibilities.
 inp_paid = total_in + total_cw
 if inp_paid + total_cr > 50_000:
     ratio = total_cr / max(total_cr + inp_paid, 1)
     if ratio < 0.4:
+        causes = []
+        # Per-turn cache hit to find sharp drop points.
+        per_turn_hits = []
+        for turn in turns:
+            if not turn: continue
+            usages = dedupe_turn(turn)
+            cr   = sum(u.get('cache_read_input_tokens', 0) for u in usages)
+            paid = (sum(u.get('input_tokens', 0) for u in usages)
+                    + sum(u.get('cache_creation_input_tokens', 0) for u in usages))
+            per_turn_hits.append(cr / max(cr + paid, 1))
+        drop_turns = [i + 1 for i in range(1, len(per_turn_hits))
+                      if per_turn_hits[i - 1] > 0.6 and per_turn_hits[i] < 0.3]
+        if drop_turns:
+            causes.append(f"sharp cache drop at turn(s) {', '.join(str(t) for t in drop_turns)}")
+        if len(set(m for m in model_per_turn if m != 'unknown')) > 1:
+            causes.append("model switch(es) mid-session")
+        if per_turn_hits and per_turn_hits[0] < 0.3:
+            causes.append("session started cold — large auto-loading rules or first session of the day")
+        cause_str = "; ".join(causes) if causes else "large auto-loading rules, frequent /clear, or context shape changes"
+        uncached_hint = (
+            "most input was uncached (full price)"
+            if cost_mode == 'api'
+            else "most input was uncached (counts against your token quota at full weight)"
+        )
         suggestions.append((
             'context',
-            f"Cache hit rate {ratio*100:.0f}% — most input was uncached (full price). Likely cause: large auto-loading rules, frequent /clear, or context shape changes mid-session. Audit `~/.claude/rules/` for big files that could be skills"
+            f"Cache hit rate {ratio*100:.0f}% — {uncached_hint}. Detected: {cause_str}. Audit `~/.claude/rules/` for big files that could be skills"
         ))
 
 # 6) Prompt pattern — many very short user prompts in a row suggests
@@ -269,7 +294,28 @@ if len(user_prompts) >= 10 and short / len(user_prompts) > 0.5:
         f"{short}/{len(user_prompts)} prompts were <60 chars — lots of turn-based steering. Per Anthropic's Opus 4.7 guide, one detailed first prompt usually beats many small follow-ups and re-uses the cache better"
     ))
 
-# 7) Subagent under-use when context grew large.
+# 7) Model switch mid-session resets the KV cache; all turns after pay full
+#    input price until the new model's cache warms back up.
+if len(turns) > 2:
+    switches = []
+    prev_m = None
+    for i, m in enumerate(model_per_turn):
+        if m == 'unknown':
+            continue
+        if prev_m and m != prev_m:
+            switches.append((i + 1, prev_m, m))
+        prev_m = m
+    if switches:
+        parts = ', '.join(
+            f"turn {i}: {a.replace('claude-', '')}→{b.replace('claude-', '')}"
+            for i, a, b in switches
+        )
+        suggestions.append((
+            'context',
+            f"Model switch(es) mid-session ({parts}) — each switch resets the KV cache; turns after the switch pay full input price until the cache warms up"
+        ))
+
+# 8) Subagent under-use when context grew large.
 if turns and turns[-1]:
     last_usages = dedupe_turn(turns[-1])
     last_u = last_usages[-1] if last_usages else {}
@@ -293,7 +339,7 @@ lines.append(f"- **Turns:** {len(turns)}")
 cost_mode_label = (
     "API rates (includes cache_read at 0.1x input)"
     if cost_mode == 'api'
-    else "Claude Code display rates (cache_read excluded, matches statusline)"
+    else "API-equivalent estimate — subscription users are not billed per-token; use token counts for quota tracking"
 )
 lines.append(f"- **Cost:** ${total_usd:.2f}  _— {cost_mode_label}_")
 if per_model_usd:
@@ -303,7 +349,8 @@ if per_model_usd:
 lines.append(f"- **Tokens:** in={total_in:,} cache_write={total_cw:,} cache_read={total_cr:,} out={total_out:,}")
 _paid = total_in + total_cw
 _hit  = total_cr / max(total_cr + _paid, 1)
-lines.append(f"- **Cache hit:** {_hit*100:.0f}% (higher = cheaper; <40% suggests context churn)")
+_hit_hint = "higher = cheaper" if cost_mode == 'api' else "higher = uses less quota"
+lines.append(f"- **Cache hit:** {_hit*100:.0f}% ({_hit_hint}; <40% suggests context churn)")
 
 # Rolling-window approximation (subscription-quota stand-in). Only included
 # if the user has opted in by setting CLAUDE_THERMOSTAT_WINDOW_TOKENS. The

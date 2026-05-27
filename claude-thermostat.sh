@@ -13,7 +13,13 @@
 #   CLAUDE_THERMOSTAT_TIME_SEC        0     0 = disabled
 #   CLAUDE_THERMOSTAT_TURNS           0     0 = disabled
 #   CLAUDE_THERMOSTAT_COST_CENTS      5000  estimated cost in US cents ($50)
+#     NOTE: subscription users (Max / Pro / Team / Enterprise) are NOT billed
+#     per-token — their quota is tracked in tokens, not dollars. The dollar
+#     figure here is an API-equivalent estimate, not real charges. Set
+#     CLAUDE_THERMOSTAT_COST_CENTS=0 to disable the dollar trigger and use
+#     CLAUDE_THERMOSTAT_WINDOW_TOKENS as the primary setpoint instead.
 #   CLAUDE_THERMOSTAT_CONTEXT_K       0     0 = disabled
+#   CLAUDE_THERMOSTAT_CACHE_HIT_MIN   0     0 = disabled; fire when session cache hit % drops below this
 #   CLAUDE_THERMOSTAT_COOLDOWN_TURNS  10    turns between re-fires after first
 #   CLAUDE_THERMOSTAT_COST_MODE       api   'api' = include cache_read at 0.1x
 #                                            input (matches published Anthropic
@@ -63,6 +69,7 @@ COST_THRESH="${CLAUDE_THERMOSTAT_COST_CENTS:-5000}"           # $50
 TIME_THRESH="${CLAUDE_THERMOSTAT_TIME_SEC:-0}"                # 0 disables
 TURNS_THRESH="${CLAUDE_THERMOSTAT_TURNS:-0}"                  # 0 disables
 CONTEXT_THRESH_K="${CLAUDE_THERMOSTAT_CONTEXT_K:-0}"          # 0 disables
+CACHE_HIT_THRESH="${CLAUDE_THERMOSTAT_CACHE_HIT_MIN:-0}"      # 0 disables
 COOLDOWN_TURNS="${CLAUDE_THERMOSTAT_COOLDOWN_TURNS:-10}"
 # Antipattern detection: fire the moment recurring waste is visible, even
 # if the dollar setpoint isn't hit yet.
@@ -221,6 +228,16 @@ print(last_context_tokens // 1000)        # K tokens
 print(primary_model)
 print(len(turns))
 print(cache_hit_pct)
+# Last-turn cache hit for sudden-drop detection in the nag.
+if turns and turns[-1]:
+    lt_usages = dedupe_turn(turns[-1])
+    lt_cr   = sum(u.get('cache_read_input_tokens', 0) for u in lt_usages)
+    lt_paid = (sum(u.get('input_tokens', 0) for u in lt_usages)
+               + sum(u.get('cache_creation_input_tokens', 0) for u in lt_usages))
+    lt_hit  = int(round(100 * lt_cr / max(lt_cr + lt_paid, 1)))
+else:
+    lt_hit = 0
+print(lt_hit)
 PY
 }
 
@@ -391,12 +408,13 @@ fi
 turn_count=$(( turn_count + 1 ))
 
 # Parse transcript (graceful: outputs zeros if file missing or unreadable).
-{ read -r cost_cents; read -r context_k; read -r model; read -r tx_turns; read -r cache_hit_pct; } < <(parse_transcript)
+{ read -r cost_cents; read -r context_k; read -r model; read -r tx_turns; read -r cache_hit_pct; read -r last_turn_cache_hit; } < <(parse_transcript)
 # Default empty values so arithmetic comparisons below don't error.
 cost_cents="${cost_cents:-0}"
 context_k="${context_k:-0}"
 tx_turns="${tx_turns:-0}"
 cache_hit_pct="${cache_hit_pct:-0}"
+last_turn_cache_hit="${last_turn_cache_hit:-0}"
 
 # Window mode only runs when the user has set a token setpoint. The index
 # scan is cheap but pointless when nothing reads its output.
@@ -457,6 +475,20 @@ fi
 if [ "$CONTEXT_THRESH_K" -gt 0 ] && [ "${context_k:-0}" -ge "$CONTEXT_THRESH_K" ]; then
   should_nag=1
   reasons+="  •  last-turn input context: ~${context_k}K tokens (each turn now costs more)"$'\n'
+fi
+# Cache hit rate: opt-in setpoint; fire when session average drops below threshold.
+if [ "$CACHE_HIT_THRESH" -gt 0 ] && [ "$tx_turns" -ge 3 ] && [ "${cache_hit_pct:-0}" -lt "$CACHE_HIT_THRESH" ]; then
+  should_nag=1
+  reasons+="  •  session cache hit rate: ${cache_hit_pct}% — below the ${CACHE_HIT_THRESH}% setpoint; most input is paying full price each turn"$'\n'
+fi
+# Per-turn cache drop: always-on, no setpoint needed. A 30+ point drop on the
+# most recent turn means something reshuffled the context mid-session.
+if [ "$tx_turns" -gt 3 ] && [ "${cache_hit_pct:-0}" -gt 50 ]; then
+  drop=$(( ${cache_hit_pct:-0} - ${last_turn_cache_hit:-0} ))
+  if [ "$drop" -ge 30 ]; then
+    should_nag=1
+    reasons+="  •  cache dropped ${drop}pp this turn (session avg ${cache_hit_pct}% → last turn ${last_turn_cache_hit}%) — context was reshuffled; likely: model switch, new large file auto-loaded, or /compact"$'\n'
+  fi
 fi
 if [ "$WINDOW_TOKENS_THRESH" -gt 0 ] && [ "$window_tokens_total" -ge "$WINDOW_TOKENS_THRESH" ]; then
   should_nag=1

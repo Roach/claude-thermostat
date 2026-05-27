@@ -14,6 +14,8 @@ Fires on every `Stop` event (when Claude finishes responding). Tracks:
 - **Context window size** — total input tokens on the most recent turn
 - **Cache hit %** — share of input tokens that hit cache (higher = cheaper turns)
 
+A sudden **per-turn cache drop** (≥30 percentage points below the session average) is detected as an always-on signal — it fires without a setpoint, flagging a context reshuffle that just made the next turn much more expensive.
+
 When the cost setpoint is crossed (or an antipattern is detected — see below), the hook exits `2`, which makes Claude surface the alert and ask the user what they'd like to do. After firing it re-arms after `CLAUDE_THERMOSTAT_COOLDOWN_TURNS` more turns (the deadband), so long sessions get periodic nudges without constant interruption.
 
 ## Files
@@ -37,13 +39,14 @@ Safe to delete — recreated on next session.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `CLAUDE_THERMOSTAT_COST_CENTS` | `5000` | Cost setpoint (US cents, $50) |
+| `CLAUDE_THERMOSTAT_COST_CENTS` | `5000` | Cost setpoint (US cents, $50). Subscription users (Max / Pro / Team / Enterprise) should consider setting this to `0` and using `CLAUDE_THERMOSTAT_WINDOW_TOKENS` as the primary setpoint instead, since dollars aren't what Anthropic charges against their quota. |
 | `CLAUDE_THERMOSTAT_TIME_SEC` | `0` | Session-age setpoint in seconds; `0` disables |
 | `CLAUDE_THERMOSTAT_TURNS` | `0` | Turn-count setpoint; `0` disables |
 | `CLAUDE_THERMOSTAT_CONTEXT_K` | `0` | Last-turn input-context setpoint (K tokens); `0` disables |
+| `CLAUDE_THERMOSTAT_CACHE_HIT_MIN` | `0` | Cache-hit-% setpoint; fires when the session cache hit rate falls below this value (requires ≥3 turns). `0` disables. |
 | `CLAUDE_THERMOSTAT_COOLDOWN_TURNS` | `10` | Deadband: turns between re-fires after first |
 | `CLAUDE_THERMOSTAT_ANTIPATTERNS` | `1` | Set to `0` to disable antipattern detection |
-| `CLAUDE_THERMOSTAT_COST_MODE` | `api` | `api` includes `cache_read` at 0.1× input (matches Anthropic's published API rates). `claude-code` excludes `cache_read`, matching the cost number Claude Code shows in its statusline for Max / Pro / Team / Enterprise plans. See [Cost modes](#cost-modes) |
+| `CLAUDE_THERMOSTAT_COST_MODE` | `api` | `api` includes `cache_read` at 0.1× input (matches Anthropic's published API rates). `subscription` (alias: `claude-code`) excludes `cache_read`, matching the cost number Claude Code shows in its statusline for Max / Pro / Team / Enterprise plans. See [Cost modes](#cost-modes) |
 | `CLAUDE_THERMOSTAT_WINDOW_SEC` | `18000` | Rolling-window length in seconds (default 5h) |
 | `CLAUDE_THERMOSTAT_WINDOW_TOKENS` | `0` | Token setpoint across the rolling window; `0` disables. See [Subscription window](#subscription-window-approximation) |
 | `CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED` | `1` | `1` weights `cache_read` at 1.0x in the window sum; `0` excludes it |
@@ -96,6 +99,7 @@ The report includes:
 - **Skill candidates** — files Read 3+ times, URLs WebFetched 2+ times, Grep patterns repeated 3+ times. These are reference material that should live in a skill.
 - **Tool choice** — if Grep/Read/Glob dominated, suggests `mcp__auggie__codebase-retrieval` for natural-language lookups; if context grew large with no subagent use, suggests delegating.
 - **Model choice** — if Opus dominated cost and produced many small outputs, flags downgrade candidates.
+- **Model switches mid-session** — flags any model change that resets the KV cache, naming the turn and models, and explains the per-turn cost penalty on cache-cold turns.
 - **Prompt patterns** — many short prompts → suggests one-shot patterns per Anthropic's Opus 4.7 best-practices.
 - Tool histogram for the session.
 
@@ -123,12 +127,12 @@ Wire it up alongside the thermostat:
 | Mode | What it bills | When to use |
 |---|---|---|
 | `api` (default) | input + `cache_creation` at 1.25× + `cache_read` at 0.1× + output | API pay-as-you-go. Matches Anthropic's [published pricing](https://www.anthropic.com/pricing). Conservative for everyone else. |
-| `claude-code` | input + `cache_creation` at 1.25× + output (cache_read excluded) | Max, Pro, Team, Enterprise. Matches the cost Claude Code shows in its statusline, which is calibrated to whatever Anthropic counts against your plan. |
+| `subscription` (alias: `claude-code`) | input + `cache_creation` at 1.25× + output (cache_read excluded) | Max, Pro, Team, Enterprise. Matches the cost Claude Code shows in its statusline. The dollar figure is an **API-equivalent estimate** — subscription users aren't billed per-token, and Anthropic doesn't publish the subscription quota formula. The figure is useful for orientation and comparison, but it isn't authoritative; use `CLAUDE_THERMOSTAT_WINDOW_TOKENS` for real quota tracking. |
 
 **Why the two modes exist:** Claude Code's statusline reports cost via `cost.total_cost_usd`, which excludes `cache_read`. The Stop hook payload doesn't include that field, so the thermostat recomputes from the transcript. For a cache-heavy session, the two numbers can disagree by 2–3×. Choosing the wrong mode hides money from one side or the other:
 
 - Subscription users on `api` mode see an inflated number that doesn't match their statusline or anything Anthropic counts. Confusing, but not financially harmful.
-- API users on `claude-code` mode see a deflated number and may not realize how much they're actually spending. **Financially harmful** — this is why `api` is the default. Subscription users should opt into `claude-code` explicitly.
+- API users on `subscription` (or `claude-code`) mode see a deflated number and may not realize how much they're actually spending. **Financially harmful** — this is why `api` is the default. Subscription users should opt into `subscription` (or `claude-code`) mode explicitly.
 
 The cooldown report header always notes which mode produced the number it shows.
 
