@@ -24,10 +24,12 @@ When the cost setpoint is crossed (or an antipattern is detected — see below),
 - `cooldown-report.sh` — the post-session cost-reduction post-mortem, wired to `SessionEnd`
 - `thermostat-status.sh` — on-demand status query; used by the `/thermostat` skill
 - `weekly-trend.sh` — 7-day (or N-day) cost/antipattern trend from cooldown reports
+- `project-audit.sh` — aggregate cooldown reports across all sessions for a project, surfacing recurring skill candidates, bash patterns, and structural gaps
 - `print-latest-cooldown.sh` — optional terminal pretty-printer for the report (call from a `claude` shell wrapper after the process exits)
 - `_lib.py` — shared pricing, dedup, and session-filter helpers
 - `skills/thermostat.md` — Claude Code skill for `/thermostat`
 - `skills/thermostat-week.md` — Claude Code skill for `/thermostat-week`
+- `skills/thermostat-project.md` — Claude Code skill for `/thermostat-project`
 - `docs/report-format.md` — stable format spec for `reports.log` and cooldown report files
 
 ## Session state
@@ -229,6 +231,49 @@ ln -s /path/to/claude-thermostat/skills/thermostat-week.md ~/.claude/skills/ther
 ```
 
 Then type `/thermostat-week` in any session. Pass a day count or `--markdown` in your message and the skill forwards it to the script.
+
+## Project audit (`/thermostat-project` skill)
+
+`project-audit.sh` aggregates cooldown reports across all sessions that touched a given project directory and produces a project-level post-mortem:
+
+```
+# Project audit — phish
+
+- Sessions analyzed: 4  (2026-05-26 → 2026-05-28)
+- Total cost: $557.21  (avg $139.30/session)
+
+## Recurring skill candidates
+| File | Sessions | Total reads |
+|---|---:|---:|
+| /projects/phish/PhishNet/core/services/zendesk_service.py | 3 | 14 |
+
+## Structural gaps
+- `CLAUDE.md` missing — add project instructions
+
+## Top suggestion categories
+- Skill candidates — appeared in 4/4 sessions (100%)
+- Better tool choices — appeared in 2/4 sessions (50%)
+```
+
+Sessions are matched to the project by looking for the project directory name or path in the report file path or content (skill-candidate lines contain full file paths, so even UUID-named reports are linked back to their project).
+
+Run directly from a terminal:
+
+```bash
+./project-audit.sh                      # audit cwd
+./project-audit.sh ~/projects/phish     # specific project
+./project-audit.sh ~/projects/phish --write  # write to ~/.claude/thermostat/project-audit-<slug>.md
+```
+
+When `--write` is used, a one-line entry is appended to `~/.claude/thermostat/project-audits.log`.
+
+### Install the skill
+
+```bash
+ln -s /path/to/claude-thermostat/skills/thermostat-project.md ~/.claude/skills/thermostat-project.md
+```
+
+Then type `/thermostat-project` in any session. The skill audits the current working directory by default; name a project or path in your message to target a different one.
 
 ## Report format
 
