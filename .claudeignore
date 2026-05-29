@@ -1,0 +1,28 @@
+# .claudeignore — keeps Claude from traversing large/irrelevant files
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Git internals
+.git/
+
+# Docs build artifacts
+docs/_site/
+docs/.jekyll-cache/
+docs/.jekyll-metadata
+
+# npm / node (docs site tooling)
+node_modules/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Test coverage artifacts
+htmlcov/
+.coverage
+.pytest_cache/
+.tox/
