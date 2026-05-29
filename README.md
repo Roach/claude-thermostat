@@ -88,8 +88,9 @@ The config file is sourced before defaults, so its values override any env vars 
 ## Suggested actions the alert offers
 
 - **`/compact`** — summarizes history and shrinks the context window. Best when the task is ongoing and context is large. Shown first when context is the trigger.
-- **`/clear`** — wipes context entirely. Best when pivoting to a new sub-task.
+- **Lower `autoCompactThreshold`** — shown when context reaches 50K+ tokens and the current threshold is above 0.75 (or unset, implying the ~0.90 default). Selecting it sets `autoCompactThreshold: 0.70` in `~/.claude/settings.json` so Claude Code compacts automatically before context bloat compounds across future sessions.
 - **`/model sonnet`** — shown when running Opus; Sonnet is 5× cheaper on both input and output.
+- **`/clear`** — wipes context entirely. Best when pivoting to a new sub-task.
 - **Close and reopen** — fully new session, lowest cost baseline. Best when the current task is done.
 - **Continue** — dismiss and keep going. The hook re-arms after `COOLDOWN_TURNS` more turns.
 

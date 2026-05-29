@@ -572,6 +572,31 @@ case "$model" in
     options+='"/model sonnet — 5× cheaper; switch for routine turns"'$'\n'
     ;;
 esac
+# Auto-compact threshold: offer when context is substantial and the current
+# threshold leaves room to lower it. Reading default (~0.9) vs. explicit value
+# so we can show the user what they have and what we're suggesting.
+if [ "${context_k:-0}" -ge 50 ]; then
+  ac_thresh=$(/usr/bin/python3 -c "
+import json, os
+p = os.path.expanduser('~/.claude/settings.json')
+try:
+    d = json.load(open(p))
+    v = d.get('autoCompactThreshold')
+    print('default' if v is None else f'{float(v):.2f}')
+except Exception:
+    print('default')
+" 2>/dev/null || echo "default")
+  # Show if threshold is at default (implied ~0.90) or explicitly above 0.75.
+  show_ac=0
+  if [ "$ac_thresh" = "default" ]; then
+    show_ac=1
+  elif /usr/bin/python3 -c "import sys; exit(0 if float(sys.argv[1]) > 0.75 else 1)" "$ac_thresh" 2>/dev/null; then
+    show_ac=1
+  fi
+  if [ "$show_ac" -eq 1 ]; then
+    options+="\"Lower autoCompactThreshold (${ac_thresh}) → 0.70 in ~/.claude/settings.json — auto-compact fires at 70% context fill\""$'\n'
+  fi
+fi
 options+='"/clear — fresh start (best when pivoting tasks)"'$'\n'
 options+='"Continue"'$'\n'
 
