@@ -512,7 +512,7 @@ fi
 if [ "$CONTEXT_THRESH_K" -gt 0 ] && [ "${context_k:-0}" -ge "$CONTEXT_THRESH_K" ]; then
   should_nag=1
   trigger_types+="context,"
-  reasons+="  •  last-turn input context: ~${context_k}K tokens (each turn now costs more)"$'\n'
+  reasons+="  •  last-turn input context: ~${context_k}K tokens — delegate new exploration to a subagent; each turn costs more as context grows"$'\n'
 fi
 # Cache hit rate: opt-in setpoint; fire when session average drops below threshold.
 if [ "$CACHE_HIT_THRESH" -gt 0 ] && [ "$tx_turns" -ge 3 ] && [ "${cache_hit_pct:-0}" -lt "$CACHE_HIT_THRESH" ]; then
@@ -563,9 +563,9 @@ fi
 options=""
 if [ "${context_k:-0}" -ge "${CONTEXT_THRESH_K:-0}" ]; then
   options+='"/compact — shrink context (best when task is ongoing)"'$'\n'
-  if [ "$has_grep_antipattern" -eq 1 ]; then
-    options+='"Delegate to a subagent — keeps exploration out of main context"'$'\n'
-  fi
+fi
+if [ "${context_k:-0}" -ge 50 ]; then
+  options+='"Delegate to a subagent — keep Read/Bash/Grep out of main context; cheaper turns"'$'\n'
 fi
 case "$model" in
   claude-opus-*)
