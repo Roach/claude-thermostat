@@ -39,16 +39,15 @@ PROJECT_DIR="$(cd "$PROJECT_DIR" 2>/dev/null && pwd)" || {
 
 [ -f "$LOG" ] || { echo "No reports.log found at $LOG — no sessions to analyze." >&2; exit 0; }
 
-/usr/bin/python3 - "$PROJECT_DIR" "$LOG" "$REPORT_DIR" "$DO_WRITE" "$AUDIT_LOG" <<'PY'
-import os, sys, re
+/usr/bin/python3 - "$PROJECT_DIR" "$LOG" "$DO_WRITE" "$AUDIT_LOG" <<'PY'
+import json, os, sys, re
 from collections import Counter, defaultdict
 from datetime import datetime
 
 project_dir  = sys.argv[1]
 log_file     = sys.argv[2]
-report_dir   = sys.argv[3]
-do_write     = sys.argv[4] == '1'
-audit_log    = sys.argv[5]
+do_write     = sys.argv[3] == '1'
+audit_log    = sys.argv[4]
 
 project_name = os.path.basename(project_dir.rstrip('/'))
 
@@ -229,7 +228,6 @@ if not os.path.exists(claude_md):
 if not os.path.isdir(commands_dir):
     gaps.append('`.claude/commands/` directory missing — store project-specific slash commands here (e.g. `/deploy`, `/test`, `/lint`)')
 if os.path.isfile(settings_json):
-    import json
     try:
         sj = json.load(open(settings_json))
         if 'permissions' not in sj:
@@ -376,7 +374,7 @@ lines.append("```bash")
 if do_write:
     lines.append(f'claude "Review my project audit at {audit_path} and help me apply the top suggestion"')
 else:
-    lines.append(f'./project-audit.sh {project_dir} --write')
+    lines.append(f'./project-audit.sh "{project_dir}" --write')
     lines.append(f'claude "Review my project audit at {audit_path} and help me apply the top suggestion"')
 lines.append("```")
 lines.append("")
