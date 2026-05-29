@@ -88,7 +88,7 @@ The config file is sourced before defaults, so its values override any env vars 
 ## Suggested actions the alert offers
 
 - **`/compact`** — summarizes history and shrinks the context window. Best when the task is ongoing and context is large. Shown when context is at or above `CLAUDE_THERMOSTAT_CONTEXT_K`.
-- **Delegate to a subagent** — shown whenever context reaches 50K+ tokens, regardless of what triggered the alert. Subagents run in their own context window, so their Read/Bash/Grep output never lands in the main thread — subsequent main-thread turns stay cheaper.
+- **Delegate to a subagent** — shown whenever context reaches 50K+ tokens, regardless of what triggered the alert. Subagents run in their own context window, so their Read/Bash/Grep output never lands in the main thread — subsequent main-thread turns stay cheaper. For this to actually save tokens, _accept the subagent's summary_ instead of re-running the same reads in the main thread to "verify" it; if the summary is thin, re-delegate with a sharper prompt rather than falling back to direct exploration. (A companion `~/.claude/CLAUDE.md` rule enforces this no-fallback discipline.)
 - **Lower `autoCompactThreshold`** — shown when context reaches 50K+ tokens and the current threshold is above 0.75 (or unset, implying the ~0.90 default). Selecting it sets `autoCompactThreshold: 0.70` in `~/.claude/settings.json` so Claude Code compacts automatically before context bloat compounds across future sessions.
 - **`/model sonnet`** — shown when running Opus; Sonnet is 5× cheaper on both input and output.
 - **`/clear`** — wipes context entirely. Best when pivoting to a new sub-task.
