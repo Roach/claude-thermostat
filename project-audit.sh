@@ -8,8 +8,8 @@
 #
 # Usage:
 #   ./project-audit.sh [project-dir]          # default: cwd
-#   ./project-audit.sh ~/projects/phish       # specific project
-#   ./project-audit.sh ~/projects/phish --write  # write to file + log entry
+#   ./project-audit.sh ~/projects/myapp        # specific project
+#   ./project-audit.sh ~/projects/myapp --write  # write to file + log entry
 
 set -u
 

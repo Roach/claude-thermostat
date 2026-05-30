@@ -237,18 +237,23 @@ Then type `/thermostat-week` in any session. Pass a day count or `--markdown` in
 `project-audit.sh` aggregates cooldown reports across all sessions that touched a given project directory and produces a project-level post-mortem:
 
 ```
-# Project audit — phish
+# Project audit — myapp
 
 - Sessions analyzed: 4  (2026-05-26 → 2026-05-28)
-- Total cost: $557.21  (avg $139.30/session)
+- Total cost: $42.10  (avg $10.53/session)
 
 ## Recurring skill candidates
 | File | Sessions | Total reads |
 |---|---:|---:|
-| /projects/phish/PhishNet/core/services/zendesk_service.py | 3 | 14 |
+| /projects/myapp/docs/openapi.yaml | 3 | 14 |
+
+## Better search tool for source files
+| File | Sessions | Total reads |
+|---|---:|---:|
+| /projects/myapp/models.py | 2 | 9 |
 
 ## Structural gaps
-- `CLAUDE.md` missing — add project instructions
+- `.claudeignore` missing — add one to exclude build artifacts
 
 ## Top suggestion categories
 - Skill candidates — appeared in 4/4 sessions (100%)
@@ -260,9 +265,9 @@ Sessions are matched to the project by looking for the project directory name or
 Run directly from a terminal:
 
 ```bash
-./project-audit.sh                      # audit cwd
-./project-audit.sh ~/projects/phish     # specific project
-./project-audit.sh ~/projects/phish --write  # write to ~/.claude/thermostat/project-audit-<slug>.md
+./project-audit.sh                          # audit cwd
+./project-audit.sh ~/projects/myapp         # specific project
+./project-audit.sh ~/projects/myapp --write # write to ~/.claude/thermostat/project-audit-<slug>.md
 ```
 
 When `--write` is used, a one-line entry is appended to `~/.claude/thermostat/project-audits.log`.
