@@ -98,12 +98,13 @@ When inefficiencies were detected:
 - ...
 ```
 
-The five category headings are **stable**:
+The six category headings are **stable**:
 
 | Heading | Meaning |
 |---|---|
 | `Model choice` | Opus used on turns that Sonnet or Haiku would have handled |
-| `New skills to consider` | Files/URLs re-read multiple times; skill candidates |
+| `New skills to consider` | Reference/config files (`.md`, `.yaml`, `.json`, etc.) re-read 3+ times; skill candidates |
+| `Better search tool for source files` | Source code files (`.py`, `.ts`, `.js`, `.go`, etc.) re-read 3+ times; use `mcp__auggie__codebase-retrieval` instead |
 | `Better tool choices` | Grep/Read chains that Auggie or a subagent would replace |
 | `Context hygiene` | Low cache hit rate, model switches, large context |
 | `Prompt patterns` | Short prompt chains, clarification-loop patterns |
@@ -141,7 +142,7 @@ Heading is `## Subscription-window approximation — caveats`. **Informational.*
 - Parse `reports.log` with the regex above; ignore lines that don't match
   (blank lines, future header lines).
 - When reading individual reports for suggestion categories, match on
-  `line.startswith('### ')` and compare the heading text to the five stable
+  `line.startswith('### ')` and compare the heading text to the six stable
   category names. Ignore unknown `###` headings.
 - Never parse the free-text suggestion bullets for structured data — they are
   human-readable prose and will change as the suggestion logic evolves.

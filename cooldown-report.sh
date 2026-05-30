@@ -185,6 +185,22 @@ suggestions = []
 # 1) Skill candidates: same file Read 3+ times, same WebFetch URL 2+ times,
 #    same Grep pattern 3+ times — these are reference material that should
 #    live in a skill (loaded once, on-demand).
+#    Source code files (.py, .ts, .js, etc.) go to an "auggie" bucket instead —
+#    they should be queried via mcp__auggie__codebase-retrieval, not bundled
+#    into a skill.
+SKILL_EXTS = {
+    '.md', '.html', '.htm', '.yaml', '.yml', '.json', '.toml', '.txt',
+    '.sql', '.env', '.cfg', '.ini', '.conf',
+}
+SOURCE_EXTS = {
+    '.py', '.ts', '.tsx', '.js', '.jsx', '.go', '.rb', '.rs', '.java',
+    '.kt', '.swift', '.c', '.cpp', '.h', '.sh', '.bash',
+}
+
+def _ext(fpath):
+    _, e = os.path.splitext(fpath)
+    return e.lower()
+
 read_counts = Counter(k for n, k, _, _ in tool_calls if n == 'Read' and k)
 # Exclude files we also edited — Claude Code re-Reads after every Edit by
 # design, so an edited file's Read count is noise, not a skill candidate.
@@ -194,10 +210,17 @@ edited_files = {k for n, k, _, _ in tool_calls
 for f, n in read_counts.most_common(8):
     if n < 3 or f in edited_files:
         continue
-    suggestions.append((
-        'skill',
-        f"Read `{f}` {n}× — convert to a skill at `~/.claude/skills/` so it loads on-demand instead of re-reading"
-    ))
+    ext = _ext(f)
+    if ext in SOURCE_EXTS:
+        suggestions.append((
+            'auggie',
+            f"Read `{f}` {n}× — use `mcp__auggie__codebase-retrieval` for lookups into this file instead of re-reading it"
+        ))
+    else:
+        suggestions.append((
+            'skill',
+            f"Read `{f}` {n}× — convert to a skill at `~/.claude/skills/` so it loads on-demand instead of re-reading"
+        ))
 
 wf_counts = Counter(k for n, k, _, _ in tool_calls if n == 'WebFetch' and k)
 for u, n in wf_counts.most_common(5):
@@ -502,13 +525,14 @@ if suggestions:
     for kind, s in suggestions:
         by_kind[kind].append(s)
     titles = {
-        'skill': 'New skills to consider',
-        'tool':  'Better tool choices',
-        'model': 'Model choice',
-        'prompt':'Prompt patterns',
+        'skill':  'New skills to consider',
+        'auggie': 'Better search tool for source files',
+        'tool':   'Better tool choices',
+        'model':  'Model choice',
+        'prompt': 'Prompt patterns',
         'context':'Context hygiene',
     }
-    for kind in ('model', 'skill', 'tool', 'context', 'prompt'):
+    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'prompt'):
         if kind not in by_kind: continue
         lines.append(f"### {titles[kind]}")
         for s in by_kind[kind]:
@@ -592,6 +616,7 @@ if suggestions:
     titles = {
         'model':  'Model choice',
         'skill':  'New skills to consider',
+        'auggie': 'Better search tool for source files',
         'tool':   'Better tool choices',
         'context':'Context hygiene',
         'prompt': 'Prompt patterns',
@@ -599,7 +624,7 @@ if suggestions:
     by_kind = defaultdict(list)
     for kind, s in suggestions:
         by_kind[kind].append(s)
-    for kind in ('model', 'skill', 'tool', 'context', 'prompt'):
+    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'prompt'):
         if kind not in by_kind: continue
         print(f"\n  {titles[kind]}:", file=sys.stderr)
         for s in by_kind[kind]:

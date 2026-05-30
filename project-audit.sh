@@ -131,11 +131,13 @@ if not project_entries:
 #   ## Configuration tuning
 
 SECTION_RE = re.compile(r'^#{1,3}\s+(.+)$')
-SKILL_ITEM_RE = re.compile(r'^-\s+Read\s+`([^`]+)`\s+(\d+)×')
-BASH_ITEM_RE  = re.compile(r'^-\s+Bash\s+`([^`]+)`\s+ran\s+(\d+)×')
+SKILL_ITEM_RE  = re.compile(r'^-\s+Read\s+`([^`]+)`\s+(\d+)×')
+AUGGIE_ITEM_RE = re.compile(r'^-\s+Read\s+`([^`]+)`\s+(\d+)×')
+BASH_ITEM_RE   = re.compile(r'^-\s+Bash\s+`([^`]+)`\s+ran\s+(\d+)×')
 
 # Per-session data keyed by report_path
-session_skills  = defaultdict(list)   # path -> [(file, count)]
+session_skills  = defaultdict(list)   # path -> [(file, count)]  — reference files
+session_auggie  = defaultdict(list)   # path -> [(file, count)]  — source files
 session_bash    = defaultdict(list)   # path -> [(cmd_snippet, count)]
 session_kinds   = defaultdict(set)    # path -> {kind, ...}  (from section headings)
 session_config  = defaultdict(list)   # path -> [config suggestion lines]
@@ -158,6 +160,11 @@ for entry in project_entries:
                     if km:
                         session_skills[rpath].append((km.group(1), int(km.group(2))))
                     session_kinds[rpath].add('skill')
+                elif 'better search tool for source files' in current_section:
+                    am = AUGGIE_ITEM_RE.match(line)
+                    if am:
+                        session_auggie[rpath].append((am.group(1), int(am.group(2))))
+                    session_kinds[rpath].add('auggie')
                 elif 'prompt patterns' in current_section:
                     bm = BASH_ITEM_RE.match(line)
                     if bm:
@@ -197,6 +204,29 @@ single_skills = [
     if len(skill_sessions[f]) == 1
 ]
 single_skills.sort(key=lambda x: -x[2])
+
+# ── aggregate Auggie candidates (source files) across sessions ─────────────
+auggie_sessions = defaultdict(set)   # file -> set of report paths
+auggie_reads    = Counter()          # file -> sum of read counts
+
+for rpath, items in session_auggie.items():
+    for fname, cnt in items:
+        auggie_sessions[fname].add(rpath)
+        auggie_reads[fname] += cnt
+
+recurring_auggie = [
+    (f, len(auggie_sessions[f]), auggie_reads[f])
+    for f in auggie_sessions
+    if len(auggie_sessions[f]) >= 2
+]
+recurring_auggie.sort(key=lambda x: (-x[1], -x[2]))
+
+single_auggie = [
+    (f, 1, auggie_reads[f])
+    for f in auggie_sessions
+    if len(auggie_sessions[f]) == 1
+]
+single_auggie.sort(key=lambda x: -x[2])
 
 # ── aggregate bash patterns ────────────────────────────────────────────────
 bash_sessions = defaultdict(set)
@@ -252,6 +282,7 @@ for kinds in session_kinds.values():
 
 KIND_LABELS = {
     'skill':   'Skill candidates',
+    'auggie':  'Source files (use Auggie)',
     'prompt':  'Prompt patterns',
     'tool':    'Better tool choices',
     'model':   'Model choice',
@@ -281,11 +312,11 @@ for e in project_entries:
     lines.append(f"| {e['ts'][:10]} | `{e['sid']}` | ${e['cost']:.2f} | {e['turns']} |")
 lines.append("")
 
-# Recurring skill candidates
+# Recurring skill candidates (reference / config files)
 lines.append("## Recurring skill candidates")
 lines.append("")
 if recurring_skills:
-    lines.append("Files read repeatedly across 2+ sessions — strong candidates for `~/.claude/skills/`:")
+    lines.append("Reference files read repeatedly across 2+ sessions — strong candidates for `~/.claude/skills/`:")
     lines.append("")
     lines.append("| File | Sessions | Total reads |")
     lines.append("|---|---:|---:|")
@@ -295,13 +326,36 @@ if recurring_skills:
     lines.append("**Action:** Create a skill at `~/.claude/skills/<name>.md` that embeds the relevant excerpt, so future sessions load it on-demand instead of re-reading the file.")
     lines.append("")
 elif single_skills:
-    lines.append("_No files read across 2+ sessions. Single-session candidates (may become recurring):_")
+    lines.append("_No reference files read across 2+ sessions. Single-session candidates (may become recurring):_")
     lines.append("")
     for fname, nsess, nreads in single_skills[:5]:
         lines.append(f"- `{fname}` — read {nreads}× in 1 session")
     lines.append("")
 else:
-    lines.append("_No repeated file reads detected across sessions._")
+    lines.append("_No repeated reference file reads detected across sessions._")
+    lines.append("")
+
+# Auggie candidates (source code files)
+lines.append("## Better search tool for source files")
+lines.append("")
+if recurring_auggie:
+    lines.append("Source files read repeatedly across 2+ sessions — use `mcp__auggie__codebase-retrieval` for lookups instead of re-reading:")
+    lines.append("")
+    lines.append("| File | Sessions | Total reads |")
+    lines.append("|---|---:|---:|")
+    for fname, nsess, nreads in recurring_auggie:
+        lines.append(f"| `{fname}` | {nsess} | {nreads} |")
+    lines.append("")
+    lines.append("**Action:** Use `mcp__auggie__codebase-retrieval` with a natural-language query instead of re-reading these files; one call replaces a chain of Read/Grep calls.")
+    lines.append("")
+elif single_auggie:
+    lines.append("_No source files read across 2+ sessions. Single-session candidates:_")
+    lines.append("")
+    for fname, nsess, nreads in single_auggie[:5]:
+        lines.append(f"- `{fname}` — read {nreads}× in 1 session")
+    lines.append("")
+else:
+    lines.append("_No repeated source file reads detected across sessions._")
     lines.append("")
 
 # Recurring bash patterns
@@ -390,6 +444,7 @@ if do_write:
         f"{now_str}  {slug}  "
         f"${total_cost:.2f}  {n_sessions}sess  "
         f"{len(recurring_skills)} recurring skill(s)  "
+        f"{len(recurring_auggie)} auggie candidate(s)  "
         f"-> {audit_path}\n"
     )
     with open(audit_log, 'a') as f:
