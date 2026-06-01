@@ -1,5 +1,9 @@
 # claude-thermostat
 
+[![claude-thermostat — a cream-paper landing card with the headline "Keep your sessions from running hot" next to a thermostat gauge reading $52.18, just past the $50 setpoint.](docs/og-image.png)](https://roach.github.io/claude-thermostat/)
+
+**[→ Read the docs at roach.github.io/claude-thermostat](https://roach.github.io/claude-thermostat/)**
+
 A Claude Code hook that watches session cost and prompts you to `/compact`, `/clear`, or pivot before the bill balloons — plus a post-session **cooldown report** with cost-reduction suggestions for next time.
 
 The metaphor is precise: a thermostat. Setpoint (`$CLAUDE_THERMOSTAT_COST_CENTS`), sensor (transcript parser), actuator (the alert), hysteresis (cooldown turns).
