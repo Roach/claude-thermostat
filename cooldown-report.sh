@@ -75,6 +75,7 @@ current_model = None
 tool_calls = []   # (tool_name, key_str, input_dict, turn_idx)
 seen_msg_ids = set()  # dedupe re-appended assistant rows for tool-call counts
 user_prompts = []
+thinking_blocks = 0   # count of extended-thinking content blocks (bill as output)
 first_ts = last_ts = None
 
 def user_text(obj):
@@ -134,6 +135,8 @@ with open(path, encoding='utf-8', errors='replace') as f:
             content = msg.get('content', [])
             if isinstance(content, list):
                 for c in content:
+                    if isinstance(c, dict) and c.get('type') == 'thinking':
+                        thinking_blocks += 1
                     if isinstance(c, dict) and c.get('type') == 'tool_use':
                         name = c.get('name', '?')
                         inp = c.get('input') or {}
@@ -354,6 +357,66 @@ if turns and turns[-1]:
             'tool',
             f"Final context was {last_ctx//1000}K tokens with no subagent use. Heavy exploration in the main thread keeps tool output in scope on every later turn — delegate to a subagent so the noise stays out"
         ))
+
+# 9) Long, hot session likely to hit auto-compaction — a fresh session is
+#    cleaner than continuing on a compacted (lossy) transcript. Recommend the
+#    checkpoint ritual: commit + push, then restart. Git history becomes the
+#    durable context instead of an ever-growing conversation.
+if turns and turns[-1]:
+    _last = dedupe_turn(turns[-1])
+    _lu = _last[-1] if _last else {}
+    _ctx = (_lu.get('input_tokens', 0)
+            + _lu.get('cache_creation_input_tokens', 0)
+            + _lu.get('cache_read_input_tokens', 0))
+    if _ctx > 140_000 and len(turns) >= 20:
+        suggestions.append((
+            'context',
+            f"Session ran long and hot ({len(turns)} turns, final context {_ctx//1000}K) — at this size you're near auto-compaction, which keeps you on a lossy transcript. If the current chunk of work is done, commit + push to checkpoint it, then start a fresh session: git history carries the context forward more cheaply than a compacted conversation. If you'd rather continue, steer the summary with `/compact <what to keep>` instead of letting it compact blind"
+        ))
+
+# 10) Extended thinking heavily used — thinking tokens bill as output. For
+#     routine turns, lowering reasoning effort trims cost without hurting
+#     quality on work that didn't need deep reasoning.
+if thinking_blocks >= 20 and total_out > 60_000:
+    suggestions.append((
+        'model',
+        f"{thinking_blocks} extended-thinking blocks and {total_out//1000}K output tokens this session — thinking bills as output. If much of this was routine, lower reasoning effort with `/effort` (or `MAX_THINKING_TOKENS=8000`) and reserve deep thinking for hard problems"
+    ))
+
+# 11) MCP surface — tool definitions load into context, and CLI equivalents
+#     are leaner. We can only see servers actually *used*; `/context` shows
+#     the ones loaded-but-idle that are pure overhead.
+mcp_servers = Counter()
+for n, _, _, _ in tool_calls:
+    if n.startswith('mcp__'):
+        parts = n.split('__')
+        if len(parts) >= 2 and parts[1]:
+            mcp_servers[parts[1]] += 1
+if len(mcp_servers) >= 2 or sum(mcp_servers.values()) >= 8:
+    srv_list = ', '.join(f"{s} ({c}×)" for s, c in mcp_servers.most_common(5))
+    suggestions.append((
+        'tool',
+        f"MCP tools used across {len(mcp_servers)} server(s): {srv_list}. Run `/context` to see what each costs and `/mcp` to disable any you're not using; prefer CLI equivalents (gh, aws, gcloud) where they exist — they add no per-tool listing to context"
+    ))
+
+# 12) Repeated reads/greps into build or dependency dirs — these belong in
+#     .claudeignore so Claude stops exploring them and burning context.
+IGNORE_DIRS = ('node_modules', 'dist', 'build', '.next', 'vendor',
+               'target', '.venv', '__pycache__', 'site-packages')
+ignore_hits = Counter()
+for n, k, _, _ in tool_calls:
+    if n in ('Read', 'Grep', 'Glob') and k:
+        for d in IGNORE_DIRS:
+            if f'/{d}/' in k or k.startswith(d + '/'):
+                ignore_hits[d] += 1
+                break
+_ign_total = sum(ignore_hits.values())
+if _ign_total >= 5:
+    dirs = ', '.join(f"{d} ({c}×)" for d, c in ignore_hits.most_common(4))
+    suggestions.append((
+        'context',
+        f"{_ign_total} reads/greps into build or dependency dirs ({dirs}) — add these to `.claudeignore` so they're excluded from exploration and don't waste context"
+    ))
 
 # --- tuning: update cross-session history and detect config patterns -----------
 
