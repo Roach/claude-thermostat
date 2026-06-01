@@ -114,6 +114,10 @@ The report includes:
 - **Model choice** — if Opus dominated cost and produced many small outputs, flags downgrade candidates.
 - **Model switches mid-session** — flags any model change that resets the KV cache, naming the turn and models, and explains the per-turn cost penalty on cache-cold turns.
 - **Prompt patterns** — many short prompts → suggests one-shot patterns per Anthropic's Opus 4.7 best-practices.
+- **Long, hot session** — when a session ran ≥20 turns and ended near the auto-compaction threshold (>140K context), suggests the checkpoint ritual (commit + push, then start fresh) so git history carries context forward instead of riding a lossy compacted transcript — or steering `/compact <what to keep>` if you'd rather continue.
+- **Extended thinking** — heavy thinking use (≥20 thinking blocks with >60K output tokens) flags that thinking bills as output; suggests lowering reasoning effort with `/effort` or `MAX_THINKING_TOKENS` for routine work.
+- **MCP surface** — when ≥2 MCP servers (or ≥8 MCP calls) were used, points you at `/context` to see per-server cost, `/mcp` to disable idle servers, and CLI equivalents (`gh`, `aws`, `gcloud`) that add no per-tool listing.
+- **`.claudeignore` candidates** — repeated reads/greps into build or dependency dirs (`node_modules`, `dist`, `build`, …) suggests excluding them so they stop burning context.
 - Tool histogram for the session.
 
 **Note:** The report filters to only the current session's turns using `session_start` from the thermostat hook's state file. If `claude-thermostat.sh` is not also enabled (i.e. no `Stop` hook), `session_start` will be 0 and the report will include all turns in the transcript file, potentially spanning multiple prior sessions.
