@@ -24,6 +24,10 @@ Hooks that watch Claude Code session cost and produce a post-session cooldown re
 
 All configurable via env vars (see README). Cost is the only enabled trigger by default ($50). Time, turn count, and context size all default to `0` (disabled) — they still get computed and displayed in the header, but don't fire on their own. Antipattern detection is on by default and fires regardless of cost.
 
+## Auto-delegation
+
+When `CLAUDE_THERMOSTAT_AUTODELEGATE_K` is set to a non-zero value, the nag message includes a directive instructing Claude to automatically route the next exploration task to a subagent when context exceeds the threshold — rather than just offering delegation as an option. `CLAUDE_THERMOSTAT_SUBAGENT_MODEL` appends a model hint to that directive (e.g. `claude-haiku-4-5-20251001` for cheaper exploration subagents).
+
 ## Pricing map
 
 Lives in `_lib.py` as `PRICING` (a `{model_id: (input, cache_write, cache_read, output)}` map in per-million-token dollars). `lookup_pricing()` strips trailing `-YYYYMMDD` suffixes before matching, so dated transcript IDs (e.g. `claude-haiku-4-5-20251001`) still resolve. Update when Anthropic changes pricing or adds new models, and verify against https://www.anthropic.com/pricing.

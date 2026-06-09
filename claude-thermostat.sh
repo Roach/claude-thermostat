@@ -83,6 +83,13 @@ COST_MODE="${CLAUDE_THERMOSTAT_COST_MODE:-api}"
 WINDOW_SEC="${CLAUDE_THERMOSTAT_WINDOW_SEC:-18000}"           # 5h
 WINDOW_TOKENS_THRESH="${CLAUDE_THERMOSTAT_WINDOW_TOKENS:-0}"  # 0 disables
 WINDOW_COUNT_CACHED="${CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED:-1}"
+# Auto-delegate: when context >= this threshold (K tokens), the nag instructs
+# Claude to automatically route the next exploration task to a subagent instead
+# of just offering it as an option. 0 disables (soft suggestion only).
+# CLAUDE_THERMOSTAT_SUBAGENT_MODEL: optional model ID passed to the subagent
+# instruction (e.g. claude-haiku-4-5-20251001). Empty = no model hint.
+AUTODELEGATE_K="${CLAUDE_THERMOSTAT_AUTODELEGATE_K:-0}"
+SUBAGENT_MODEL="${CLAUDE_THERMOSTAT_SUBAGENT_MODEL:-}"
 
 input="$(cat)"
 now=$(date +%s)
@@ -397,6 +404,32 @@ for u, n in Counter(wf_keys).most_common(2):
         reasons.append(f"WebFetch on {u!r} x{n} — page content is in context already")
         break
 
+# 7) MCP result accumulation — each call's response stays in context for
+#    the rest of the session. When a server is hit repeatedly, the payloads
+#    pile up fast. /compact is the only flush mechanism mid-session.
+mcp_by_server = Counter()
+for n, k, _ in recent:
+    if n.startswith('mcp__'):
+        parts = n.split('__')
+        if len(parts) >= 2 and parts[1]:
+            mcp_by_server[parts[1]] += 1
+fired_mcp = False
+for server, n in mcp_by_server.most_common(2):
+    if n >= 5:
+        reasons.append(
+            f"{n} '{server}' MCP calls in last {WINDOW} tool calls — "
+            f"each response stays in context; /compact to flush before continuing"
+        )
+        fired_mcp = True
+        break
+total_mcp = sum(mcp_by_server.values())
+if not fired_mcp and total_mcp >= 10:
+    srv_list = ', '.join(f"{s} ({c}x)" for s, c in mcp_by_server.most_common(3))
+    reasons.append(
+        f"{total_mcp} MCP calls in last {WINDOW} tool calls ({srv_list}) — "
+        f"responses accumulate in context; /compact to flush before continuing"
+    )
+
 for r in reasons:
     print(r)
 PY
@@ -565,7 +598,12 @@ if [ "${context_k:-0}" -ge "${CONTEXT_THRESH_K:-0}" ]; then
   options+='"/compact — shrink context (best when task is ongoing)"'$'\n'
 fi
 if [ "${context_k:-0}" -ge 50 ]; then
-  options+='"Delegate to a subagent — keep Read/Bash/Grep out of main context; cheaper turns"'$'\n'
+  if [ "$AUTODELEGATE_K" -gt 0 ] && [ "${context_k:-0}" -ge "$AUTODELEGATE_K" ]; then
+    # Above the auto-delegate threshold: list it first and mark it as recommended.
+    options+='"Delegate to a subagent (recommended — context above auto-delegate threshold)"'$'\n'
+  else
+    options+='"Delegate to a subagent — keep Read/Bash/Grep out of main context; cheaper turns"'$'\n'
+  fi
 fi
 case "$model" in
   claude-opus-*)
@@ -606,6 +644,17 @@ if [ "$nag_count" -eq 1 ]; then
   structural_note="After the user responds, add one brief note: audit \`~/.claude/rules/\` for large docs that could be skills (\`~/.claude/skills/\`), and narrow rule globs to directories that need them."
 fi
 
+# Auto-delegate directive: when context is above the threshold, instruct Claude
+# to automatically route the next exploration task to a subagent. This fires
+# regardless of what triggered the nag — it's additive context hygiene advice.
+autodelegate_directive=""
+if [ "$AUTODELEGATE_K" -gt 0 ] && [ "${context_k:-0}" -ge "$AUTODELEGATE_K" ] && [ "${context_k:-0}" -ge 50 ]; then
+  autodelegate_directive="IMPORTANT: Context is at ${context_k}K tokens (above the ${AUTODELEGATE_K}K auto-delegate threshold). After the user responds, automatically route the next exploration task (any Read/Bash/Grep/search work) to a subagent — do not run it in the main thread."
+  if [ -n "$SUBAGENT_MODEL" ]; then
+    autodelegate_directive+=" Use model '${SUBAGENT_MODEL}' when spawning the subagent."
+  fi
+fi
+
 msg="🌡  ${header}"$'\n'
 msg+="${reasons}"$'\n'
 msg+="Present this to the user using the ask_followup_question tool — call it directly, do not narrate first."$'\n'
@@ -615,6 +664,10 @@ msg+="${options}"
 if [ -n "$structural_note" ]; then
   msg+=$'\n'
   msg+="${structural_note}"$'\n'
+fi
+if [ -n "$autodelegate_directive" ]; then
+  msg+=$'\n'
+  msg+="${autodelegate_directive}"$'\n'
 fi
 msg+=$'\n'
 msg+="After the user responds, execute their choice. Don't fire again unless setpoints are crossed again."

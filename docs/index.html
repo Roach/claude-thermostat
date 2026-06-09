@@ -1396,6 +1396,7 @@
         <li><b>Prompt pattern</b> — 12/19 prompts were &lt;60 chars. Many turn-based corrections — one detailed first prompt often beats many small follow-ups and reuses cache better.</li>
         <li><b>Long, hot session</b> — 24 turns, final context 168K — near auto-compaction. Commit + push to checkpoint, then start fresh: git history carries context forward more cheaply than a compacted transcript. Or steer it with <code>/compact &lt;what to keep&gt;</code>.</li>
         <li><b>Extended thinking</b> — 31 thinking blocks and 74K output tokens. Thinking bills as output; for routine work, lower reasoning effort with <code>/effort</code> or <code>MAX_THINKING_TOKENS</code>.</li>
+        <li><b>MCP result accumulation</b> — 7 <code>claude_ai_Atlassian_2</code> calls in the last 30 tool calls. Each response stays in context for the rest of the session; run <code>/compact</code> to flush before continuing.</li>
         <li><b>MCP surface</b> — tools used across 2 servers. Run <code>/context</code> to see what each costs, <code>/mcp</code> to disable idle ones, and prefer CLI tools (<code>gh</code>, <code>aws</code>) — they add no per-tool listing.</li>
         <li><b>.claudeignore candidate</b> — 9 reads/greps into <code>node_modules</code> and <code>dist</code>. Add them to <code>.claudeignore</code> so they stop burning context.</li>
       </ul>
@@ -1591,7 +1592,7 @@
       <tr>
         <td class="name">CLAUDE_THERMOSTAT_ANTIPATTERNS</td>
         <td class="default"><span>1</span></td>
-        <td class="meaning">Antipattern detection (re-Read loops, repeat Bash, exploration grep-chains, subagent over-spawn). Set to 0 to disable.</td>
+        <td class="meaning">Antipattern detection (re-Read loops, repeat Bash, exploration grep-chains, subagent over-spawn, MCP result accumulation). Set to 0 to disable.</td>
       </tr>
       <tr>
         <td class="name">CLAUDE_THERMOSTAT_COST_MODE</td>
@@ -1612,6 +1613,16 @@
         <td class="name">CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED</td>
         <td class="default"><span>1</span></td>
         <td class="meaning">Whether <code>cache_read_input_tokens</code> count toward the window sum. <code>1</code> weights them at 1.0x (conservative), <code>0</code> excludes them.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_AUTODELEGATE_K</td>
+        <td class="default"><span>0</span></td>
+        <td class="meaning">Context threshold (K tokens) at which the nag <em>instructs</em> Claude to automatically route the next exploration task to a subagent, rather than just offering it as an option. <code>0</code> = soft suggestion only. Recommended: <code>150</code>.</td>
+      </tr>
+      <tr>
+        <td class="name">CLAUDE_THERMOSTAT_SUBAGENT_MODEL</td>
+        <td class="default"><span></span></td>
+        <td class="meaning">Model ID passed to the auto-delegate instruction (e.g. <code>claude-haiku-4-5-20251001</code>). Empty = no model hint; Claude uses the session default. Set to a cheaper model to cut subagent cost — e.g. <code>claude-sonnet-4-6</code> is 5&times; cheaper than Opus.</td>
       </tr>
       <tr>
         <td class="name">CLAUDE_THERMOSTAT_CONFIG</td>

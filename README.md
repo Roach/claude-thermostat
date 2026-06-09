@@ -61,6 +61,8 @@ Safe to delete — recreated on next session.
 | `CLAUDE_THERMOSTAT_WINDOW_SEC` | `18000` | Rolling-window length in seconds (default 5h) |
 | `CLAUDE_THERMOSTAT_WINDOW_TOKENS` | `0` | Token setpoint across the rolling window; `0` disables. See [Subscription window](#subscription-window-approximation) |
 | `CLAUDE_THERMOSTAT_WINDOW_COUNT_CACHED` | `1` | `1` weights `cache_read` at 1.0x in the window sum; `0` excludes it |
+| `CLAUDE_THERMOSTAT_AUTODELEGATE_K` | `0` | Context threshold (K tokens) at which the nag *instructs* Claude to automatically route the next exploration task to a subagent, rather than just offering it as an option. `0` = soft suggestion only. Recommended: `150` |
+| `CLAUDE_THERMOSTAT_SUBAGENT_MODEL` | `` | Model ID passed to the auto-delegate instruction (e.g. `claude-haiku-4-5-20251001`). Empty = no model hint; Claude picks the session default. Set to a cheaper model to cut subagent cost. |
 | `CLAUDE_THERMOSTAT_CONFIG` | `~/.claude/thermostat/config.env` | Path to optional config file |
 
 ### Config file
