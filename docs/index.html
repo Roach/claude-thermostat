@@ -1399,6 +1399,7 @@
         <li><b>MCP result accumulation</b> — 7 <code>claude_ai_Atlassian_2</code> calls in the last 30 tool calls. Each response stays in context for the rest of the session; run <code>/compact</code> to flush before continuing.</li>
         <li><b>MCP surface</b> — tools used across 2 servers. Run <code>/context</code> to see what each costs, <code>/mcp</code> to disable idle ones, and prefer CLI tools (<code>gh</code>, <code>aws</code>) — they add no per-tool listing.</li>
         <li><b>.claudeignore candidate</b> — 9 reads/greps into <code>node_modules</code> and <code>dist</code>. Add them to <code>.claudeignore</code> so they stop burning context.</li>
+        <li><b>Inline deterministic work</b> — 3 turns with ≥4000 output tokens and no Bash/Write/Edit. Model may have computed or reformatted data inline instead of scripting it. Install the deterministic-toolkit skill for mechanical work: parsing, converting formats, deduping, aggregating, validating, diffing. Scripts are deterministic; in-context arithmetic is not.</li>
       </ul>
     </div>
   </div>
@@ -1592,7 +1593,7 @@
       <tr>
         <td class="name">CLAUDE_THERMOSTAT_ANTIPATTERNS</td>
         <td class="default"><span>1</span></td>
-        <td class="meaning">Antipattern detection (re-Read loops, repeat Bash, exploration grep-chains, subagent over-spawn, MCP result accumulation). Set to 0 to disable.</td>
+        <td class="meaning">Antipattern detection (re-Read loops, repeat Bash, exploration grep-chains, subagent over-spawn, MCP result accumulation, inline deterministic work). Set to 0 to disable.</td>
       </tr>
       <tr>
         <td class="name">CLAUDE_THERMOSTAT_COST_MODE</td>

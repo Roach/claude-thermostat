@@ -300,6 +300,7 @@ if not path or not os.path.exists(path):
 WINDOW = 30   # last N assistant messages (deduped by message.id)
 tool_calls = []  # list of (tool_name, key) where key collapses identical calls
 seen_msg_ids = set()   # dedupe re-appended assistant rows by message.id
+msg_stats = []   # (output_tokens, has_script_call) per unique assistant message
 with open(path, encoding='utf-8', errors='replace') as f:
     for line in f:
         line = line.strip()
@@ -321,6 +322,14 @@ with open(path, encoding='utf-8', errors='replace') as f:
         content = obj.get('message', {}).get('content', [])
         if not isinstance(content, list):
             continue
+        # Track output tokens + script-call presence for deterministic-work detection.
+        _usage = obj.get('message', {}).get('usage') or {}
+        _has_script = any(
+            isinstance(c2, dict) and c2.get('type') == 'tool_use'
+            and c2.get('name') in ('Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit')
+            for c2 in content
+        )
+        msg_stats.append((_usage.get('output_tokens', 0), _has_script))
         for c in content:
             if not isinstance(c, dict) or c.get('type') != 'tool_use':
                 continue
@@ -428,6 +437,22 @@ if not fired_mcp and total_mcp >= 10:
     reasons.append(
         f"{total_mcp} MCP calls in last {WINDOW} tool calls ({srv_list}) — "
         f"responses accumulate in context; /compact to flush before continuing"
+    )
+
+# 8) High-output turns with no Bash/Write calls in the recent window —
+#    model grinding through deterministic work (data transforms, arithmetic,
+#    row-by-row reformatting) instead of scripting it. A single tested script
+#    does the same work faster, cheaper, and reproducibly.
+OUTPUT_THRESH = 3000
+recent_msgs = msg_stats[-WINDOW:]
+high_out_no_script = [o for o, has_s in recent_msgs if o >= OUTPUT_THRESH and not has_s]
+if len(high_out_no_script) >= 2:
+    total_out_k = sum(high_out_no_script) // 1000
+    reasons.append(
+        f"{len(high_out_no_script)} high-output turns (≥{OUTPUT_THRESH} tokens, no Bash/Write) "
+        f"in last {WINDOW} messages ({total_out_k}K output total) — model may be doing "
+        f"deterministic work inline (data transforms, formatting, arithmetic); "
+        f"use the deterministic-toolkit skill to script it instead"
     )
 
 for r in reasons:

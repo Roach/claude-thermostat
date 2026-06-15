@@ -418,6 +418,32 @@ if _ign_total >= 5:
         f"{_ign_total} reads/greps into build or dependency dirs ({dirs}) — add these to `.claudeignore` so they're excluded from exploration and don't waste context"
     ))
 
+# 13) High-output turns with no Bash/Write/Edit — model doing deterministic
+#     work inline (data transforms, arithmetic, formatting, row-by-row
+#     reformatting) instead of scripting it. Scripts are faster, cheaper,
+#     and always produce the same answer.
+OUTPUT_INLINE_THRESH = 4000
+turns_with_scripts = {ti for n, _, _, ti in tool_calls
+                      if n in ('Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit')}
+high_output_inline = []
+for _ti, _turn in enumerate(turns):
+    if not _turn: continue
+    _usages = dedupe_turn(_turn)
+    _out_tok = sum(u.get('output_tokens', 0) for u in _usages)
+    if _out_tok >= OUTPUT_INLINE_THRESH and _ti not in turns_with_scripts:
+        high_output_inline.append(_out_tok)
+if len(high_output_inline) >= 2:
+    _total_inline_out = sum(high_output_inline)
+    suggestions.append((
+        'tool',
+        f"{len(high_output_inline)} turns with ≥{OUTPUT_INLINE_THRESH} output tokens and no Bash/Write "
+        f"({_total_inline_out//1000}K tokens total) — model may have computed or reformatted data "
+        f"inline instead of scripting it. Install the deterministic-toolkit skill "
+        f"(`~/.claude/skills/`) for mechanical work: parsing, converting formats, deduping, "
+        f"aggregating, validating, diffing. Scripts are deterministic; in-context arithmetic "
+        f"and reformatting are not."
+    ))
+
 # --- tuning: update cross-session history and detect config patterns -----------
 
 def _load_tuning(path):

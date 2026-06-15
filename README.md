@@ -120,6 +120,7 @@ The report includes:
 - **Extended thinking** — heavy thinking use (≥20 thinking blocks with >60K output tokens) flags that thinking bills as output; suggests lowering reasoning effort with `/effort` or `MAX_THINKING_TOKENS` for routine work.
 - **MCP surface** — when ≥2 MCP servers (or ≥8 MCP calls) were used, points you at `/context` to see per-server cost, `/mcp` to disable idle servers, and CLI equivalents (`gh`, `aws`, `gcloud`) that add no per-tool listing.
 - **`.claudeignore` candidates** — repeated reads/greps into build or dependency dirs (`node_modules`, `dist`, `build`, …) suggests excluding them so they stop burning context.
+- **Inline deterministic work** — ≥2 turns with ≥4000 output tokens and no Bash/Write/Edit suggests the model computed or reformatted data inline instead of scripting it; points to a deterministic-toolkit skill for mechanical work (parsing, converting formats, deduping, aggregating, diffing).
 - Tool histogram for the session.
 
 **Note:** The report filters to only the current session's turns using `session_start` from the thermostat hook's state file. If `claude-thermostat.sh` is not also enabled (i.e. no `Stop` hook), `session_start` will be 0 and the report will include all turns in the transcript file, potentially spanning multiple prior sessions.
