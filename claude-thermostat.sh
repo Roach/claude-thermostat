@@ -632,7 +632,10 @@ if [ "${context_k:-0}" -ge 50 ]; then
 fi
 case "$model" in
   claude-opus-*)
-    options+='"/model sonnet — 5× cheaper; switch for routine turns"'$'\n'
+    options+='"/model sonnet — ~1.7× cheaper; switch for routine turns"'$'\n'
+    ;;
+  claude-fable-*|claude-mythos-*)
+    options+='"/model sonnet — ~3.3× cheaper; switch for routine turns"'$'\n'
     ;;
 esac
 # Auto-compact threshold: offer when context is substantial and the current

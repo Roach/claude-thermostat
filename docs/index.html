@@ -1134,7 +1134,7 @@
 <span class="alert-line dim">Tell the user and ask them what they'd like to do:</span>
 <span class="alert-line choice"><code>/compact</code> — summarize history, shrink the context window; best when context is large and the task is ongoing</span>
 <span class="alert-line choice"><code>Lower autoCompactThreshold (default) → 0.70</code> — auto-compact fires at 70% context fill; updates ~/.claude/settings.json</span>
-<span class="alert-line choice"><code>/model sonnet</code> — Opus input is 5× Sonnet ($15 vs $3 per M tokens); switch unless this turn really needs Opus reasoning</span>
+<span class="alert-line choice"><code>/model sonnet</code> — Opus input is ~1.7× Sonnet ($5 vs $3 per M tokens); switch unless this turn really needs Opus reasoning</span>
 <span class="alert-line choice"><code>/clear</code> — wipe context entirely; good when pivoting to a new task</span>
 <span class="alert-line choice"><code>Close + reopen</code> — lowest-cost baseline; use when this task is done</span>
 <span class="alert-line choice"><code>Continue</code> — if you're nearly done and want to push through</span>
@@ -1390,7 +1390,7 @@
     <div class="findings">
       <h5>Suggestions for next session</h5>
       <ul>
-        <li><b>Model choice</b> — 4 Opus turns produced &lt;500 output tokens. These were small lookups; Sonnet (5× cheaper) would have done it. Use <code>/model sonnet</code> for routine work.</li>
+        <li><b>Model choice</b> — 4 Opus turns produced &lt;500 output tokens. These were small lookups; Sonnet (~1.7× cheaper) would have done it. Use <code>/model sonnet</code> for routine work.</li>
         <li><b>Skill candidate</b> — Read <code>docs/pricing-spec.md</code> 5× — convert to a skill at <code>~/.claude/skills/</code> so it loads on demand rather than re-reading every turn.</li>
         <li><b>Tool choice</b> — 38 Grep/Read/Glob calls (61% of all tool use). Try <code>mcp__auggie__codebase-retrieval</code> for natural-language lookups; one call usually replaces a chain.</li>
         <li><b>Prompt pattern</b> — 12/19 prompts were &lt;60 chars. Many turn-based corrections — one detailed first prompt often beats many small follow-ups and reuses cache better.</li>
@@ -1623,7 +1623,7 @@
       <tr>
         <td class="name">CLAUDE_THERMOSTAT_SUBAGENT_MODEL</td>
         <td class="default"><span></span></td>
-        <td class="meaning">Model ID passed to the auto-delegate instruction (e.g. <code>claude-haiku-4-5-20251001</code>). Empty = no model hint; Claude uses the session default. Set to a cheaper model to cut subagent cost — e.g. <code>claude-sonnet-4-6</code> is 5&times; cheaper than Opus.</td>
+        <td class="meaning">Model ID passed to the auto-delegate instruction (e.g. <code>claude-haiku-4-5-20251001</code>). Empty = no model hint; Claude uses the session default. Set to a cheaper model to cut subagent cost — e.g. <code>claude-haiku-4-5</code> is 5&times; cheaper than Opus.</td>
       </tr>
       <tr>
         <td class="name">CLAUDE_THERMOSTAT_CONFIG</td>

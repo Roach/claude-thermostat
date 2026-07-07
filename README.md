@@ -14,7 +14,7 @@ Fires on every `Stop` event (when Claude finishes responding). Tracks:
 
 - **Session age** — wall-clock time since the first turn
 - **Turn count** — completed back-and-forth exchanges
-- **Estimated cost** — parsed from the session transcript JSONL, using actual token counts and per-model pricing (Sonnet, Opus, Haiku). Deduplicates re-appended assistant messages by `message.id` so the estimate matches what Anthropic actually bills.
+- **Estimated cost** — parsed from the session transcript JSONL, using actual token counts and per-model pricing (Fable, Opus, Sonnet, Haiku). Deduplicates re-appended assistant messages by `message.id` so the estimate matches what Anthropic actually bills.
 - **Context window size** — total input tokens on the most recent turn
 - **Cache hit %** — share of input tokens that hit cache (higher = cheaper turns)
 
@@ -98,7 +98,7 @@ The config file is sourced before defaults, so its values override any env vars 
 - **`/compact`** — summarizes history and shrinks the context window. Best when the task is ongoing and context is large. Shown when context is at or above `CLAUDE_THERMOSTAT_CONTEXT_K`.
 - **Delegate to a subagent** — shown whenever context reaches 50K+ tokens, regardless of what triggered the alert. Subagents run in their own context window, so their Read/Bash/Grep output never lands in the main thread — subsequent main-thread turns stay cheaper. For this to actually save tokens, _accept the subagent's summary_ instead of re-running the same reads in the main thread to "verify" it; if the summary is thin, re-delegate with a sharper prompt rather than falling back to direct exploration. (A companion `~/.claude/CLAUDE.md` rule enforces this no-fallback discipline.)
 - **Lower `autoCompactThreshold`** — shown when context reaches 50K+ tokens and the current threshold is above 0.75 (or unset, implying the ~0.90 default). Selecting it sets `autoCompactThreshold: 0.70` in `~/.claude/settings.json` so Claude Code compacts automatically before context bloat compounds across future sessions.
-- **`/model sonnet`** — shown when running Opus; Sonnet is 5× cheaper on both input and output.
+- **`/model sonnet`** — shown when running a premium-tier model; Sonnet is ~1.7× cheaper than Opus and ~3.3× cheaper than Fable on both input and output.
 - **`/clear`** — wipes context entirely. Best when pivoting to a new sub-task.
 - **Close and reopen** — fully new session, lowest cost baseline. Best when the current task is done.
 - **Continue** — dismiss and keep going. The hook re-arms after `COOLDOWN_TURNS` more turns.
