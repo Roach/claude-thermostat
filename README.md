@@ -188,7 +188,7 @@ thermostat status · session a1b2c3d4
   Cost:      $0.47  (subscription-estimated)
   Context:   43K tokens  (last turn)
   Cache hit: 78% session avg, 72% last turn
-  Model:     sonnet-4-6
+  Model:     sonnet-5
 
   Tokens:    in=142K  cw=12K  cr=438K  out=18K
 ```

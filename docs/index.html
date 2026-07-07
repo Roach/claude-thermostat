@@ -1132,12 +1132,12 @@
 <span class="alert-line bullet">estimated session cost: $52.18</span>
 <span class="alert-line bullet">antipattern: re-Read of 'src/billing/router.ts' ×4 in last 30 tool calls</span>
 <span class="alert-line dim">Tell the user and ask them what they'd like to do:</span>
-<span class="alert-line choice"><code>/compact</code> — summarize history, shrink the context window; best when context is large and the task is ongoing</span>
-<span class="alert-line choice"><code>Lower autoCompactThreshold (default) → 0.70</code> — auto-compact fires at 70% context fill; updates ~/.claude/settings.json</span>
-<span class="alert-line choice"><code>/model sonnet</code> — Opus input is ~1.7× Sonnet ($5 vs $3 per M tokens); switch unless this turn really needs Opus reasoning</span>
-<span class="alert-line choice"><code>/clear</code> — wipe context entirely; good when pivoting to a new task</span>
-<span class="alert-line choice"><code>Close + reopen</code> — lowest-cost baseline; use when this task is done</span>
-<span class="alert-line choice"><code>Continue</code> — if you're nearly done and want to push through</span>
+<span class="alert-line choice"><code>/compact</code> — shrink context (best when task is ongoing)</span>
+<span class="alert-line choice"><code>Delegate to a subagent</code> — keep Read/Bash/Grep out of main context; cheaper turns</span>
+<span class="alert-line choice"><code>/model sonnet</code> — ~3.3× cheaper; switch for routine turns</span>
+<span class="alert-line choice"><code>Lower autoCompactThreshold (default) → 0.70 in ~/.claude/settings.json</code> — auto-compact fires at 70% context fill</span>
+<span class="alert-line choice"><code>/clear</code> — fresh start (best when pivoting tasks)</span>
+<span class="alert-line choice"><code>Continue</code></span>
       </div>
     </div>
 
@@ -1371,7 +1371,7 @@
     <div class="report-grid">
       <div class="report-stat">
         <div class="k">Cost</div>
-        <div class="v">$13.32 <small>opus-4-7 · 100%</small></div>
+        <div class="v">$13.32 <small>fable-5 · 100%</small></div>
       </div>
       <div class="report-stat">
         <div class="k">Duration</div>
@@ -1390,7 +1390,7 @@
     <div class="findings">
       <h5>Suggestions for next session</h5>
       <ul>
-        <li><b>Model choice</b> — 4 Opus turns produced &lt;500 output tokens. These were small lookups; Sonnet (~1.7× cheaper) would have done it. Use <code>/model sonnet</code> for routine work.</li>
+        <li><b>Model choice</b> — 4 Fable turns produced &lt;500 output tokens. These were small lookups; Sonnet (~3.3× cheaper) or Haiku (~10× cheaper) would have handled them. Use <code>/model sonnet</code> for routine work.</li>
         <li><b>Skill candidate</b> — Read <code>docs/pricing-spec.md</code> 5× — convert to a skill at <code>~/.claude/skills/</code> so it loads on demand rather than re-reading every turn.</li>
         <li><b>Tool choice</b> — 38 Grep/Read/Glob calls (61% of all tool use). Try <code>mcp__auggie__codebase-retrieval</code> for natural-language lookups; one call usually replaces a chain.</li>
         <li><b>Prompt pattern</b> — 12/19 prompts were &lt;60 chars. Many turn-based corrections — one detailed first prompt often beats many small follow-ups and reuses cache better.</li>
@@ -1432,7 +1432,7 @@
 <span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Cost:      $0.63  (subscription-estimated)</span>
 <span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Context:   139K tokens  (last turn)</span>
 <span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Cache hit: 97% session avg, 100% last turn</span>
-<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Model:     sonnet-4-6</span>
+<span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Model:     sonnet-5</span>
 <span class="alert-line" style="display:block;height:8px;"></span>
 <span class="alert-line" style="display:block;color:var(--ink-soft);padding-left:2px;">  Tokens:    in=64  cw=85K  cr=2.8M  out=21K</span>
       </div>
