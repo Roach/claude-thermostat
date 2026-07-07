@@ -399,7 +399,7 @@ for sa, n in Counter(agent_keys).most_common(2):
 #    input tokens fast. A single Auggie codebase-retrieval call is usually
 #    cheaper and more accurate.
 explor = [n for n, _, _ in recent if n in ('Grep', 'Read', 'Glob')]
-if len(explor) >= 10:
+if len(explor) >= 6:
     reasons.append(
         f"{len(explor)} Grep/Read/Glob calls in last {WINDOW} tool calls — "
         f"try mcp__auggie__codebase-retrieval for natural-language lookups"

@@ -30,7 +30,7 @@ When `CLAUDE_THERMOSTAT_AUTODELEGATE_K` is set to a non-zero value, the nag mess
 
 ## Pricing map
 
-Lives in `_lib.py` as `PRICING` (a `{model_id: (input, cache_write, cache_read, output)}` map in per-million-token dollars). `lookup_pricing()` strips trailing `-YYYYMMDD` suffixes before matching, so dated transcript IDs (e.g. `claude-haiku-4-5-20251001`) still resolve. Update when Anthropic changes pricing or adds new models, and verify against https://www.anthropic.com/pricing.
+Lives in `_lib.py` as `PRICING` (a `{model_id: (input, cache_write, cache_read, output)}` map in per-million-token dollars). `lookup_pricing()` strips trailing `-YYYYMMDD` suffixes and `[...]` context-tier suffixes before matching, so dated transcript IDs (e.g. `claude-haiku-4-5-20251001`) and tiered IDs (e.g. `claude-fable-5[1m]`) still resolve. Sonnet 5 introductory pricing ($2/$10 through 2026-08-31) is applied date-aware and flips to standard rates automatically. Update when Anthropic changes pricing or adds new models, and verify against https://www.anthropic.com/pricing.
 
 ## Billing correctness
 

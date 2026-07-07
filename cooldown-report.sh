@@ -261,20 +261,27 @@ for cmd, n in bash_keys.most_common(3):
             f"Bash `{snippet}` ran {n}× — script it, alias it, or capture the output in a skill"
         ))
 
-# 4) Model choice — Opus turns that produced trivial output are downgrade candidates.
-opus_turns = [(t, m) for t, m in zip(turns, model_per_turn) if m.startswith('claude-opus')]
-if opus_turns and per_model_usd:
-    opus_usd = sum(c for m, c in per_model_usd.items() if m.startswith('claude-opus'))
-    opus_share = opus_usd / max(total_usd, 1e-9)
-    if opus_share > 0.5 and total_usd > 1.0:
+# 4) Model choice — premium-tier (Opus/Fable) turns that produced trivial
+#    output are downgrade candidates. Ratios come from the live pricing
+#    table so they stay accurate when rates change.
+PREMIUM = ('claude-opus', 'claude-fable', 'claude-mythos')
+prem_turns = [(t, m) for t, m in zip(turns, model_per_turn) if m.startswith(PREMIUM)]
+if prem_turns and per_model_usd:
+    prem_usd = sum(c for m, c in per_model_usd.items() if m.startswith(PREMIUM))
+    prem_share = prem_usd / max(total_usd, 1e-9)
+    if prem_share > 0.5 and total_usd > 1.0:
         cheap_count = 0
-        for t, _ in opus_turns:
+        for t, _ in prem_turns:
             out = sum(u.get('output_tokens', 0) for _, u in t)
             if out < 500: cheap_count += 1
         if cheap_count >= 3:
+            prem_out = lookup_pricing(prem_turns[0][1])[3]
+            son_x = prem_out / lookup_pricing('claude-sonnet-5')[3]
+            hai_x = prem_out / lookup_pricing('claude-haiku-4-5')[3]
+            label = 'Opus' if prem_turns[0][1].startswith('claude-opus') else 'Fable'
             suggestions.append((
                 'model',
-                f"{cheap_count} Opus turn(s) produced <500 output tokens — these were small lookups/edits that Sonnet (5× cheaper) or Haiku (18× cheaper) would have handled. Use `/model sonnet` for routine work; reserve Opus for hard reasoning"
+                f"{cheap_count} {label} turn(s) produced <500 output tokens — these were small lookups/edits that Sonnet (~{son_x:.1f}× cheaper) or Haiku (~{hai_x:.0f}× cheaper) would have handled. Use `/model sonnet` for routine work; reserve {label} for hard reasoning"
             ))
 
 # 5) Cache hit rate — low cache_read ratio means context churn (rules

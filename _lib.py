@@ -9,31 +9,52 @@ from datetime import datetime
 # like "-20251001" before matching, so dated IDs in transcripts still resolve.
 # Verify against https://www.anthropic.com/pricing whenever a new model ships.
 PRICING = {
-    'claude-opus-4-7':    (15.00, 18.75, 1.50, 75.00),
+    'claude-fable-5':     (10.00, 12.50, 1.00, 50.00),
+    'claude-mythos-5':    (10.00, 12.50, 1.00, 50.00),
+    'claude-opus-4-8':    ( 5.00,  6.25, 0.50, 25.00),
+    'claude-opus-4-7':    ( 5.00,  6.25, 0.50, 25.00),
+    'claude-opus-4-6':    ( 5.00,  6.25, 0.50, 25.00),
+    'claude-sonnet-5':    ( 3.00,  3.75, 0.30, 15.00),
     'claude-sonnet-4-6':  ( 3.00,  3.75, 0.30, 15.00),
     'claude-haiku-4-5':   ( 1.00,  1.25, 0.10,  5.00),
 }
 DEFAULT_PRICING = (3.00, 3.75, 0.30, 15.00)  # Sonnet as fallback
+
+# Sonnet 5 launched with introductory pricing ($2/$10) through 2026-08-31;
+# standard $3/$15 applies from 2026-09-01. Sessions are billed at whichever
+# rate is live now — close enough since reports run at session end.
+_SONNET_5_INTRO = (2.00, 2.50, 0.20, 10.00)
+_SONNET_5_INTRO_END = datetime(2026, 9, 1).timestamp()
 
 
 def lookup_pricing(model_id):
     """Return the pricing tuple for a transcript `model` string.
 
     Transcripts sometimes carry dated IDs (e.g. `claude-haiku-4-5-20251001`)
-    that don't match the canonical PRICING keys. We try exact match first,
-    then progressively strip trailing `-xxx` segments until we find a hit.
-    Falls back to Sonnet pricing when nothing matches.
+    or a Claude Code context-tier suffix (e.g. `claude-fable-5[1m]`) that
+    don't match the canonical PRICING keys. We strip any `[...]` suffix, try
+    exact match, then progressively strip trailing `-xxx` segments until we
+    find a hit. The `[1m]` tier carries no pricing premium on any current
+    model, so dropping it is billing-neutral. Falls back to Sonnet pricing
+    when nothing matches.
     """
     if not model_id:
         return DEFAULT_PRICING
+    model_id = model_id.split('[')[0]
+
+    def _resolve(key):
+        if key == 'claude-sonnet-5' and time.time() < _SONNET_5_INTRO_END:
+            return _SONNET_5_INTRO
+        return PRICING[key]
+
     if model_id in PRICING:
-        return PRICING[model_id]
+        return _resolve(model_id)
     parts = model_id.split('-')
     while len(parts) > 1:
         parts.pop()
         candidate = '-'.join(parts)
         if candidate in PRICING:
-            return PRICING[candidate]
+            return _resolve(candidate)
     return DEFAULT_PRICING
 
 
