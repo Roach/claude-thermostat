@@ -117,6 +117,7 @@ The report includes:
 - **Model switches mid-session** — flags any model change that resets the KV cache, naming the turn and models, and explains the per-turn cost penalty on cache-cold turns.
 - **Prompt patterns** — many short prompts → suggests one-shot patterns per Anthropic's Opus 4.7 best-practices.
 - **Long, hot session** — when a session ran ≥20 turns and ended near the auto-compaction threshold (>140K context), suggests the checkpoint ritual (commit + push, then start fresh) so git history carries context forward instead of riding a lossy compacted transcript — or steering `/compact <what to keep>` if you'd rather continue.
+- **Multi-day session** — a session whose wall-clock span reached 12+ hours across ≥10 turns. Distinct from the context-size check above: this fires on staleness even when context stayed modest, because every idle gap past the 5-minute cache TTL restarts the cache cold and the transcript keeps re-billing as it ages.
 - **Extended thinking** — heavy thinking use (≥20 thinking blocks with >60K output tokens) flags that thinking bills as output; suggests lowering reasoning effort with `/effort` or `MAX_THINKING_TOKENS` for routine work.
 - **MCP surface** — when ≥2 MCP servers (or ≥8 MCP calls) were used, points you at `/context` to see per-server cost, `/mcp` to disable idle servers, and CLI equivalents (`gh`, `aws`, `gcloud`) that add no per-tool listing.
 - **`.claudeignore` candidates** — repeated reads/greps into build or dependency dirs (`node_modules`, `dist`, `build`, …) suggests excluding them so they stop burning context.
@@ -144,6 +145,36 @@ Wire it up alongside the thermostat:
   }
 ]
 ```
+
+## Recommended companion rules
+
+The thermostat *detects* waste after the fact; a few standing rules in `~/.claude/CLAUDE.md` (or a team-shared `CLAUDE.md`) prevent the most expensive patterns up front. These three address the dominant costs found across real report corpora — long stale sessions, main-thread exploration, and turn-based micro-steering:
+
+```markdown
+## Delegate bulk exploration to subagents
+
+For multi-file searches, log/codebase spelunking, or any read-heavy
+investigation, use a subagent (Agent tool) so raw tool output stays out of
+the main transcript — it re-bills on every later turn. Reserve the main
+thread for decisions and edits. If the main thread has accumulated many
+Reads/Greps with no subagent and context is climbing, switch to delegation.
+
+## Checkpoint and restart long sessions
+
+When a session passes ~25 turns or ~150K context, proactively offer to
+commit + push a checkpoint and continue in a fresh session rather than
+letting the transcript grow toward auto-compaction. Git history carries
+context forward more cheaply than a compacted (lossy) conversation.
+
+## Consolidate requirements before acting
+
+When a request is ambiguous or likely to spawn many follow-up turns, gather
+the full requirements up front (one AskUserQuestion round) instead of
+iterating one short turn at a time — each short follow-up re-bills the
+whole cached transcript.
+```
+
+The third one is worth pairing with a habit on the human side: one detailed first prompt beats many `<60`-character follow-ups, and the report's **Prompt patterns** signal will tell you when steering is dominating.
 
 ## Cost modes
 

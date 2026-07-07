@@ -24,6 +24,15 @@ REPORT_DIR="$STATE_DIR/reports"
 LOG="$STATE_DIR/reports.log"
 mkdir -p "$REPORT_DIR"
 
+# Same optional config the Stop hook sources — keeps the tuning suggestions
+# comparing against the user's real setpoints, not the defaults. set -a so
+# the values reach the python child process.
+CONFIG_FILE="${CLAUDE_THERMOSTAT_CONFIG:-$STATE_DIR/config.env}"
+if [ -f "$CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a; . "$CONFIG_FILE"; set +a
+fi
+
 input="$(cat)"
 
 { read -r session_id; read -r transcript_path; read -r reason; } < <(
@@ -556,6 +565,24 @@ if any('sonnet-5' in m for m in per_model_usd):
             f"Not a regression when it happens"
         ))
 
+# 19) Multi-day / stale session — a transcript left open half a day or more
+#     keeps growing and re-billing, and every idle gap past the 5-minute TTL
+#     restarts the cache cold. Distinct from #9 (context size): this fires on
+#     wall-clock span even when context stayed modest.
+if first_ts and last_ts:
+    _a, _b = parse_ts(first_ts), parse_ts(last_ts)
+    if _a and _b:
+        _span_h = (_b - _a).total_seconds() / 3600
+        if _span_h >= 12 and len(turns) >= 10:
+            _span_str = f"{_span_h/24:.1f} days" if _span_h >= 48 else f"{_span_h:.0f}h"
+            suggestions.append((
+                'context',
+                f"This session stayed open {_span_str} across {len(turns)} turns — long-lived "
+                f"sessions carry a stale, ever-growing transcript, and each idle gap over 5 min "
+                f"expires the cache. Checkpoint with commit + push and start fresh: git history "
+                f"is cheaper to reload than a multi-day conversation"
+            ))
+
 # --- tuning: update cross-session history and detect config patterns -----------
 
 def _load_tuning(path):
@@ -826,7 +853,9 @@ if suggestions:
         'auggie': 'Better search tool for source files',
         'tool':   'Better tool choices',
         'context':'Context hygiene',
+        'cache':  'Cache economics',
         'prompt': 'Prompt patterns',
+        'pricing':'Pricing changes',
     }
     by_kind = defaultdict(list)
     for kind, s in suggestions:
