@@ -15,7 +15,7 @@ Hooks that watch Claude Code session cost and produce a post-session cooldown re
 
 1. Reads `session_id`, `transcript_path`, `stop_hook_active` from stdin JSON
 2. Skips immediately if `stop_hook_active` is true (prevents loop after the previous fire re-activates Claude)
-3. Parses the transcript JSONL for actual token usage per assistant turn; computes cost estimate using per-model pricing
+3. Incrementally parses the transcript JSONL — the state file's `tx` block persists a byte offset, running per-model token totals, and a rolling 30-call tool window, so each Stop only reads the lines appended since the last one (a shrunken file triggers a full re-scan). Cost, antipattern detection, and state save all happen in one python process; a nag adds one more.
 4. Checks four signals: session age, turn count, cost, and last-turn context size
 5. If a setpoint is crossed AND the cooldown (turns since last fire) has elapsed: prints the alert to stderr, exits 2
 6. Exit 2 from a Stop hook re-activates Claude, which relays the alert to the user

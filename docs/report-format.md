@@ -78,6 +78,10 @@ The report opens with an H1 heading followed by a bulleted metadata block:
 - **By model:** <MODEL>=<$COST>, ...          ← omitted when only one model
 - **Tokens:** in=<N> cache_write=<N> cache_read=<N> out=<N>
 - **Cache hit:** <N>%  (<hint>; <threshold note>)
+- **Session-start overhead:** <N>K tokens loaded before the first prompt
+               ← omitted when the first API call couldn't be identified
+- **Compactions:** <N> (context was summarized mid-session)
+               ← only present when the session auto-compacted
 - **Window:** ~<N> tokens in the last <N>h (local approximation; see notes)
                ← only present when CLAUDE_THERMOSTAT_WINDOW_TOKENS is set
 ```
@@ -98,16 +102,18 @@ When inefficiencies were detected:
 - ...
 ```
 
-The six category headings are **stable**:
+The eight category headings are **stable**:
 
 | Heading | Meaning |
 |---|---|
-| `Model choice` | Opus used on turns that Sonnet or Haiku would have handled |
+| `Model choice` | A premium-tier model (Opus/Fable) used on turns that Sonnet or Haiku would have handled |
 | `New skills to consider` | Reference/config files (`.md`, `.yaml`, `.json`, etc.) re-read 3+ times; skill candidates |
 | `Better search tool for source files` | Source code files (`.py`, `.ts`, `.js`, `.go`, etc.) re-read 3+ times; use `mcp__auggie__codebase-retrieval` instead |
-| `Better tool choices` | Grep/Read chains that Auggie or a subagent would replace |
-| `Context hygiene` | Low cache hit rate, model switches, large context |
+| `Better tool choices` | Grep/Read chains that Auggie or a subagent would replace; repeated failed tool calls |
+| `Context hygiene` | Low cache hit rate, model switches, large context, session-start overhead, post-compact re-reads |
+| `Cache economics` | Cache expirations from idle gaps longer than the 5-minute TTL |
 | `Prompt patterns` | Short prompt chains, clarification-loop patterns |
+| `Pricing changes` | Upcoming rate flips (e.g. introductory pricing ending) |
 
 When no inefficiencies are detected:
 

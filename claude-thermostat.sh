@@ -39,7 +39,11 @@
 #   "Stop": [{ "hooks": [{ "type": "command",
 #              "command": "/abs/path/to/claude-thermostat/claude-thermostat.sh" }] }]
 #
-# State lives at ~/.claude/thermostat/<session_id>.json.
+# State lives at ~/.claude/thermostat/<session_id>.json. Since the incremental
+# rework, the state file also carries a `tx` block (transcript byte offset,
+# running per-model token totals, rolling tool-call window) so each Stop only
+# parses the lines appended since the previous one — the hook's cost no longer
+# grows with session length, and the whole analysis is one python process.
 
 set -u
 
@@ -94,311 +98,278 @@ SUBAGENT_MODEL="${CLAUDE_THERMOSTAT_SUBAGENT_MODEL:-}"
 input="$(cat)"
 now=$(date +%s)
 
-{ read -r session_id; read -r stop_hook_active; read -r transcript_path; } < <(
-  printf '%s' "$input" | /usr/bin/python3 -c \
-    "import json,sys; d=json.load(sys.stdin); [print(d.get(k,'')) for k in ['session_id','stop_hook_active','transcript_path']]" 2>/dev/null
-)
-[ -z "$session_id" ] && exit 0
-
-# Stop hooks re-activate Claude when exiting 2. stop_hook_active is set to
-# true on that re-invocation so we don't loop.
-if [ "$stop_hook_active" = "True" ] || [ "$stop_hook_active" = "true" ]; then
-  exit 0
-fi
-
-state_file="$STATE_DIR/${session_id}.json"
-
-# --- state helpers -----------------------------------------------------------
-
-read_state() {
-  /usr/bin/python3 - "$state_file" <<'PY'
-import json, os, sys
-p = sys.argv[1]
-d = json.load(open(p)) if os.path.exists(p) else {}
-print(d.get('session_start', 0))
-print(d.get('turn_count', 0))
-print(d.get('last_nag_turn', 0))
-print(d.get('nag_count', 0))
-PY
-}
-
-write_state() {
-  SS="$1" TC="$2" LNT="$3" NC="$4" /usr/bin/python3 - "$state_file" <<'PY'
-import json, os, sys
-p = sys.argv[1]
-existing = {}
-if os.path.exists(p):
-    try:
-        existing = json.load(open(p))
-    except Exception:
-        pass
-d = {
-    'session_start':  int(os.environ['SS']),
-    'turn_count':     int(os.environ['TC']),
-    'last_nag_turn':  int(os.environ['LNT']),
-    'nag_count':      int(os.environ['NC']),
-    'nag_history':    existing.get('nag_history', []),
-}
-json.dump(d, open(p, 'w'))
-PY
-}
-
-# Appends one nag event to nag_history in the state file.
-# Called only when the alert actually fires, after write_state sets the scalar fields.
-append_nag_event() {
-  TURN="$1" COST="$2" CTX_K="$3" TRIGGERS="$4" /usr/bin/python3 - "$state_file" <<'PY'
-import json, os, sys
-p = sys.argv[1]
-try:
-    d = json.load(open(p)) if os.path.exists(p) else {}
-except Exception:
-    d = {}
-hist = d.get('nag_history', [])
-hist.append({
-    'turn':       int(os.environ['TURN']),
-    'cost_cents': int(os.environ['COST']),
-    'context_k':  int(os.environ['CTX_K']),
-    'triggers':   [t.strip() for t in os.environ['TRIGGERS'].split(',') if t.strip()],
-})
-d['nag_history'] = hist
-json.dump(d, open(p, 'w'))
-PY
-}
-
-# --- parse transcript for cost + context data --------------------------------
-
-# Reads the session transcript JSONL and returns four lines:
-#   total_cost_cents  (int, rounded)
-#   last_context_k    (int, total input tokens of most recent turn / 1000)
-#   model             (string, e.g. claude-sonnet-4-6)
-#   assistant_turns   (int, number of assistant messages with usage)
+# --- single-pass incremental analysis ----------------------------------------
 #
-# Only counts turns whose timestamp >= session_start so resumed sessions
-# don't accumulate cost from prior conversations in the same file.
-parse_transcript() {
-  /usr/bin/python3 - "$transcript_path" "$session_start" "$COST_MODE" <<'PY'
-import json, sys, os
+# One python process does everything the hook needs per Stop: parse the hook
+# JSON, load state, tail-scan only the transcript bytes appended since the
+# last invocation (offset + running totals live in the state file's `tx`
+# block), compute cost / context / cache stats, run the antipattern detectors
+# over a persisted rolling window of the last 30 tool calls, save state
+# atomically, and print everything the shell needs.
+#
+# Output protocol: 15 fixed lines, then zero or more antipattern reason lines.
+#   1 session_id   2 stop_hook_active(0/1)   3 session_start   4 turn_count
+#   5 last_nag_turn   6 nag_count   7 cost_cents   8 context_k   9 model
+#   10 tx_turns   11 cache_hit_pct   12 last_turn_cache_hit   13 cost_display
+#   14 ac_thresh   15 show_ac
+#
+# On truncation/rotation (file shrank) the tx block resets and the transcript
+# is re-scanned from byte 0, so the totals self-heal. If python dies, output
+# is empty and the shell exits 0 — fail open, never block a turn.
+#
+# Defined as a function so the heredoc is parsed as a plain command — bash 3.2
+# (macOS default) mis-parses backticks inside heredocs wrapped directly in $( ).
+analyze() {
+  HOOK_JSON="$input" STATE_DIR_ARG="$STATE_DIR" \
+  COST_MODE_ARG="$COST_MODE" NOW_ARG="$now" /usr/bin/python3 - <<'PY' 2>/dev/null
+import json, os, re, sys, time
 from collections import Counter
 sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
-from _lib import is_real_user, in_session, turn_cost_usd, dedupe_turn
+from _lib import is_real_user, in_session, lookup_pricing
 
-path       = sys.argv[1]
-start_unix = int(sys.argv[2]) if len(sys.argv) > 2 else 0
-cost_mode  = sys.argv[3] if len(sys.argv) > 3 else 'api'
+SLEEP_RE = re.compile(r'(?<![A-Za-z_])sleep\s+(\d+)')
+WINDOW = 30      # rolling tool-call / message window for antipattern detection
+SEEN_CAP = 500   # recent message.ids kept for dedupe (re-appends are adjacent)
 
-if not path or not os.path.exists(path):
-    # cost_cents, context_k, primary_model, turns, cache_hit_pct
-    print(0); print(0); print('unknown'); print(0); print(0)
+def tool_key(name, inp):
+    if name == 'Read': return (inp.get('file_path') or '').strip()
+    if name == 'Bash': return (inp.get('command') or '').strip()
+    if name == 'Grep': return (inp.get('pattern') or '') + '|' + (inp.get('path') or '')
+    if name == 'WebFetch': return (inp.get('url') or '').strip()
+    if name == 'Agent': return inp.get('subagent_type') or 'general-purpose'
+    if name in ('Edit', 'Write', 'MultiEdit', 'NotebookEdit'):
+        return (inp.get('file_path') or inp.get('notebook_path') or '').strip()
+    return ''
+
+def emit(session_id='', active=1, ss=0, tc=0, lnt=0, nc=0, cost=0, ctx=0,
+         model='unknown', turns=0, hit=0, lt_hit=0, disp='$0.00',
+         ac='default', show_ac=1, reasons=()):
+    for v in (session_id, active, ss, tc, lnt, nc, cost, ctx, model,
+              turns, hit, lt_hit, disp, ac, show_ac):
+        print(v)
+    for r in reasons:
+        print(r)
+
+try:
+    hook = json.loads(os.environ.get('HOOK_JSON') or '{}')
+except Exception:
+    hook = {}
+session_id = str(hook.get('session_id') or '')
+active = 1 if str(hook.get('stop_hook_active')).lower() == 'true' else 0
+tpath = hook.get('transcript_path') or ''
+NOW = int(os.environ.get('NOW_ARG') or time.time())
+cost_mode = os.environ.get('COST_MODE_ARG') or 'api'
+state_dir = os.environ['STATE_DIR_ARG']
+
+if not session_id or active:
+    emit(session_id=session_id, active=active)
     sys.exit(0)
 
-# Group assistant messages by user turn. Each turn entry is a list of
-# (message.id, usage_dict). Claude Code re-appends the same assistant
-# message on every tool round-trip with the same `msg_xxx` id; dedupe_turn
-# collapses those before billing, so we don't double-count input/output/cw.
+state_file = os.path.join(state_dir, session_id + '.json')
+try:
+    st = json.load(open(state_file)) if os.path.exists(state_file) else {}
+except Exception:
+    st = {}
+ss  = int(st.get('session_start') or 0) or NOW
+tc  = int(st.get('turn_count') or 0) + 1
+lnt = int(st.get('last_nag_turn') or 0)
+nc  = int(st.get('nag_count') or 0)
+tx  = st.get('tx') if isinstance(st.get('tx'), dict) else {}
 
-turns = []
-turn_models = []
-current_turn = []
-current_model = None
-
-with open(path, encoding='utf-8', errors='replace') as f:
-    for line in f:
-        line = line.strip()
-        if not line:
+# --- incremental transcript scan ---
+size = -1
+if tpath:
+    try:
+        size = os.path.getsize(tpath)
+    except OSError:
+        size = -1
+if size >= 0:
+    if size < int(tx.get('size') or 0):
+        tx = {}                       # truncated / rotated: full re-scan
+    offset = int(tx.get('offset') or 0)
+    if offset > size:
+        offset, tx = 0, {}
+    tok    = tx.get('tok') or {}      # model -> [in, cache_write, cache_read, out]
+    seen   = list(tx.get('seen') or [])
+    seen_set = set(seen)
+    calls  = list(tx.get('calls') or [])   # [name, key, max_sleep_secs]
+    msgs   = list(tx.get('msgs') or [])    # [output_tokens, has_script_call]
+    closed = int(tx.get('closed_turns') or 0)
+    cur_has_usage = bool(tx.get('cur_has_usage'))
+    cur_model = tx.get('cur_model') or None
+    cur_cr    = int(tx.get('cur_cr') or 0)
+    cur_paid  = int(tx.get('cur_paid') or 0)
+    last_ctx  = int(tx.get('last_ctx') or 0)
+    consumed = 0
+    tail = b''
+    try:
+        with open(tpath, 'rb') as f:
+            f.seek(offset)
+            tail = f.read()
+        nl = tail.rfind(b'\n')
+        if nl < 0:            # file ends mid-line: leave fragment for next pass
+            tail = b''
+        else:
+            consumed = nl + 1
+            tail = tail[:consumed]
+    except OSError:
+        tail = b''
+    for raw in tail.splitlines():
+        if not raw.strip():
             continue
         try:
-            obj = json.loads(line)
+            obj = json.loads(raw.decode('utf-8', errors='replace'))
         except Exception:
             continue
         t = obj.get('type')
         if t == 'user':
-            if not in_session(obj, start_unix):
+            if not in_session(obj, ss):
                 continue
             if is_real_user(obj):
-                if current_turn:
-                    turns.append(current_turn)
-                    turn_models.append(current_model or 'unknown')
-                    current_turn = []
-                    current_model = None
+                if cur_has_usage:
+                    closed += 1
+                cur_has_usage = False
+                cur_model = None
+                cur_cr = cur_paid = 0
         elif t == 'assistant':
-            if not in_session(obj, start_unix):
+            if not in_session(obj, ss):
                 continue
-            msg = obj.get('message', {})
+            msg = obj.get('message') or {}
+            mid = msg.get('id')
+            if mid:
+                if mid in seen_set:   # re-appended row (tool round-trip): billed already
+                    continue
+                seen_set.add(mid)
+                seen.append(mid)
             usage = msg.get('usage')
-            if not usage:
-                continue
             m = msg.get('model')
-            # Track the FIRST model seen per turn (a mid-turn switch is rare
-            # but tool round-trips re-emit the same model id anyway).
-            if m and not current_model and m != '<synthetic>':
-                current_model = m
-            current_turn.append((msg.get('id'), usage))
-if current_turn:
-    turns.append(current_turn)
-    turn_models.append(current_model or 'unknown')
+            if usage:
+                # Bill the whole turn at the turn's first non-synthetic model.
+                if cur_model is None and m and m != '<synthetic>':
+                    cur_model = m
+                bill_model = cur_model or (m if m and m != '<synthetic>' else None) or 'unknown'
+                row = tok.setdefault(bill_model, [0, 0, 0, 0])
+                i  = usage.get('input_tokens', 0) or 0
+                cw = usage.get('cache_creation_input_tokens', 0) or 0
+                cr = usage.get('cache_read_input_tokens', 0) or 0
+                o  = usage.get('output_tokens', 0) or 0
+                row[0] += i; row[1] += cw; row[2] += cr; row[3] += o
+                cur_has_usage = True
+                cur_cr += cr
+                cur_paid += i + cw
+                last_ctx = i + cw + cr
+            content = msg.get('content', [])
+            if isinstance(content, list):
+                has_script = False
+                for c in content:
+                    if not isinstance(c, dict) or c.get('type') != 'tool_use':
+                        continue
+                    name = c.get('name', '?')
+                    inp = c.get('input') or {}
+                    if name in ('Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'):
+                        has_script = True
+                    slp = 0
+                    if name == 'Bash':
+                        mt = SLEEP_RE.search(inp.get('command') or '')
+                        if mt:
+                            slp = int(mt.group(1))
+                    calls.append([name, tool_key(name, inp), slp])
+                msgs.append([(usage or {}).get('output_tokens', 0) or 0, has_script])
+    tx = {
+        'offset': offset + consumed, 'size': size,
+        'tok': tok, 'seen': seen[-SEEN_CAP:],
+        'calls': calls[-WINDOW:], 'msgs': msgs[-WINDOW:],
+        'closed_turns': closed, 'cur_has_usage': cur_has_usage,
+        'cur_model': cur_model, 'cur_cr': cur_cr, 'cur_paid': cur_paid,
+        'last_ctx': last_ctx,
+    }
 
-total_cost_usd = 0.0
-total_cr = total_paid_input = 0
-last_context_tokens = 0
-model_usd = Counter()
-
-for turn, model in zip(turns, turn_models):
-    if not turn:
-        continue
-    cost, inp, cw, cr, out = turn_cost_usd(turn, model, mode=cost_mode)
-    total_cost_usd += cost
-    model_usd[model] += cost
-    total_cr += cr
-    total_paid_input += inp + cw
-    # Context size = last unique usage row's total input footprint.
-    usages = dedupe_turn(turn)
-    last = usages[-1]
-    last_context_tokens = (last.get('input_tokens', 0)
-                           + last.get('cache_creation_input_tokens', 0)
-                           + last.get('cache_read_input_tokens', 0))
-
-primary_model = model_usd.most_common(1)[0][0] if model_usd else 'unknown'
-cache_hit_pct = int(round(100 * total_cr / max(total_cr + total_paid_input, 1)))
-
-print(int(round(total_cost_usd * 100)))   # cents
-print(last_context_tokens // 1000)        # K tokens
-print(primary_model)
-print(len(turns))
-print(cache_hit_pct)
-# Last-turn cache hit for sudden-drop detection in the nag.
-if turns and turns[-1]:
-    lt_usages = dedupe_turn(turns[-1])
-    lt_cr   = sum(u.get('cache_read_input_tokens', 0) for u in lt_usages)
-    lt_paid = (sum(u.get('input_tokens', 0) for u in lt_usages)
-               + sum(u.get('cache_creation_input_tokens', 0) for u in lt_usages))
-    lt_hit  = int(round(100 * lt_cr / max(lt_cr + lt_paid, 1)))
-else:
-    lt_hit = 0
-print(lt_hit)
-PY
+# --- save state (atomic) ---
+st_out = {
+    'session_start': ss, 'turn_count': tc,
+    'last_nag_turn': lnt, 'nag_count': nc,
+    'nag_history': st.get('nag_history', []),
+    'tx': tx,
 }
+try:
+    tmp = state_file + '.tmp'
+    json.dump(st_out, open(tmp, 'w'))
+    os.replace(tmp, state_file)
+except OSError:
+    pass
 
-# --- antipattern detection ---------------------------------------------------
-#
-# Scans the last ~20 assistant messages for tool-use patterns that burn
-# tokens without making progress. Each detector returns a one-line reason
-# string when fired; the main loop nags as soon as any fires, regardless
-# of the cost threshold. Tuned to catch "we're $5 in but spending
-# inefficiently" before the bill stacks up.
-detect_antipatterns() {
-  /usr/bin/python3 - "$transcript_path" "$session_start" <<'PY'
-import json, os, re, sys
-from collections import Counter
-sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
-from _lib import in_session
-
-path = sys.argv[1]
-start_unix = int(sys.argv[2]) if len(sys.argv) > 2 else 0
-if not path or not os.path.exists(path):
+# --- derive outputs ---
+if size < 0:
+    # Transcript missing/unreadable: report zeros (matches historical behavior)
+    # but keep whatever tx we had so totals survive a transient glitch.
+    emit(session_id, 0, ss, tc, lnt, nc)
     sys.exit(0)
 
-WINDOW = 30   # last N assistant messages (deduped by message.id)
-tool_calls = []  # list of (tool_name, key) where key collapses identical calls
-seen_msg_ids = set()   # dedupe re-appended assistant rows by message.id
-msg_stats = []   # (output_tokens, has_script_call) per unique assistant message
-with open(path, encoding='utf-8', errors='replace') as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except Exception:
-            continue
-        if obj.get('type') != 'assistant':
-            continue
-        if not in_session(obj, start_unix):
-            continue
-        mid = obj.get('message', {}).get('id')
-        if mid:
-            if mid in seen_msg_ids:
-                continue
-            seen_msg_ids.add(mid)
-        content = obj.get('message', {}).get('content', [])
-        if not isinstance(content, list):
-            continue
-        # Track output tokens + script-call presence for deterministic-work detection.
-        _usage = obj.get('message', {}).get('usage') or {}
-        _has_script = any(
-            isinstance(c2, dict) and c2.get('type') == 'tool_use'
-            and c2.get('name') in ('Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit')
-            for c2 in content
-        )
-        msg_stats.append((_usage.get('output_tokens', 0), _has_script))
-        for c in content:
-            if not isinstance(c, dict) or c.get('type') != 'tool_use':
-                continue
-            name = c.get('name', '?')
-            inp  = c.get('input') or {}
-            if name == 'Read':
-                key = ('Read', (inp.get('file_path') or '').strip())
-            elif name == 'Bash':
-                # Collapse on full command — re-running the same exact shell
-                # invocation is the signal we want.
-                key = ('Bash', (inp.get('command') or '').strip())
-            elif name == 'Grep':
-                key = ('Grep', (inp.get('pattern') or '') + '|' + (inp.get('path') or ''))
-            elif name == 'WebFetch':
-                key = ('WebFetch', (inp.get('url') or '').strip())
-            elif name == 'Agent':
-                key = ('Agent', (inp.get('subagent_type') or 'general-purpose'))
-            elif name in ('Edit', 'Write', 'MultiEdit', 'NotebookEdit'):
-                key = (name, (inp.get('file_path') or inp.get('notebook_path') or '').strip())
-            else:
-                key = (name, '')
-            tool_calls.append((name, key, inp))
+cost_by_model = {}
+total_usd = 0.0
+total_cr = total_paid = 0
+for mdl, (i, cw, cr, o) in (tx.get('tok') or {}).items():
+    p = lookup_pricing(mdl)
+    cr_cost = cr * p[2] if cost_mode == 'api' else 0
+    c = (i * p[0] + cw * p[1] + cr_cost + o * p[3]) / 1_000_000
+    cost_by_model[mdl] = c
+    total_usd += c
+    total_cr += cr
+    total_paid += i + cw
+cost_cents = int(round(total_usd * 100))
+context_k = int(tx.get('last_ctx') or 0) // 1000
+primary = max(cost_by_model, key=cost_by_model.get) if cost_by_model else 'unknown'
+tx_turns = int(tx.get('closed_turns') or 0) + (1 if tx.get('cur_has_usage') else 0)
+hit = int(round(100 * total_cr / max(total_cr + total_paid, 1)))
+ccr, cpaid = int(tx.get('cur_cr') or 0), int(tx.get('cur_paid') or 0)
+lt_hit = int(round(100 * ccr / max(ccr + cpaid, 1)))
 
-recent = tool_calls[-WINDOW:]
+# --- antipattern detection over the persisted rolling window ---
+# Same detectors as the historical full-scan version; the window now lives in
+# state so each Stop only appends the new turn's calls.
 reasons = []
+recent = [(r[0], r[1], r[2]) for r in (tx.get('calls') or [])]
+msg_stats = [(r[0], r[1]) for r in (tx.get('msgs') or [])]
 
 # 1) Same Read of the same file ≥3 times in the recent window — context
 #    that's already been read is still in scope; rereading wastes input.
 #    Exclude files that were also edited: re-reading after every Edit is
 #    expected (the tool needs to verify the change), not a waste signal.
-edited_files = {k[1] for n, k, _ in recent
-                if n in ('Edit', 'Write', 'MultiEdit', 'NotebookEdit') and k[1]}
-read_keys = [k for n, k, _ in recent if n == 'Read' and k[1] not in edited_files]
-for key, n in Counter(read_keys).most_common(3):
-    if n >= 3:
-        reasons.append(f"re-Read of {key[1]!r} x{n} in last {WINDOW} tool calls")
+edited_files = {k for n, k, s in recent
+                if n in ('Edit', 'Write', 'MultiEdit', 'NotebookEdit') and k}
+read_keys = [k for n, k, s in recent if n == 'Read' and k not in edited_files]
+for key, cnt in Counter(read_keys).most_common(3):
+    if cnt >= 3:
+        reasons.append(f"re-Read of {key!r} x{cnt} in last {WINDOW} tool calls")
         break
 
 # 2) Same Bash command run ≥3 times — usually a copy-paste retry loop.
-bash_keys = [k for n, k, _ in recent if n == 'Bash' and k[1]]
-for key, n in Counter(bash_keys).most_common(3):
-    if n >= 3:
-        snippet = key[1][:80].replace('\n', ' ')
-        reasons.append(f"repeated Bash {snippet!r} x{n}")
+bash_keys = [k for n, k, s in recent if n == 'Bash' and k]
+for key, cnt in Counter(bash_keys).most_common(3):
+    if cnt >= 3:
+        snippet = key[:80].replace('\n', ' ')
+        reasons.append(f"repeated Bash {snippet!r} x{cnt}")
         break
 
 # 3) Long sleeps in Bash — script-level `sleep 60+` chains. The harness
 #    already blocks naked long sleeps but inline ones still slip through.
-for n, k, inp in recent:
-    if n != 'Bash':
-        continue
-    cmd = (inp.get('command') or '')
-    m = re.search(r'(?<![A-Za-z_])sleep\s+(\d+)', cmd)
-    if m and int(m.group(1)) >= 60:
-        reasons.append(f"long inline `sleep {m.group(1)}` in a Bash call (use run_in_background instead)")
+for n, k, s in recent:
+    if n == 'Bash' and s >= 60:
+        reasons.append(f"long inline `sleep {s}` in a Bash call (use run_in_background instead)")
         break
 
 # 4) Subagent over-spawn — 3+ Agent calls of the same subagent_type recent.
-agent_keys = [k[1] for n, k, _ in recent if n == 'Agent']
-for sa, n in Counter(agent_keys).most_common(2):
-    if n >= 3:
-        reasons.append(f"{n} {sa!r} subagent spawns in last {WINDOW} tool calls — consider direct tools")
+agent_keys = [k for n, k, s in recent if n == 'Agent']
+for sa, cnt in Counter(agent_keys).most_common(2):
+    if cnt >= 3:
+        reasons.append(f"{cnt} {sa!r} subagent spawns in last {WINDOW} tool calls — consider direct tools")
         break
 
 # 5) Exploratory grep-chain: lots of distinct Grep + Read calls in the
 #    recent window suggests "feeling around" the codebase, which burns
 #    input tokens fast. A single Auggie codebase-retrieval call is usually
 #    cheaper and more accurate.
-explor = [n for n, _, _ in recent if n in ('Grep', 'Read', 'Glob')]
+explor = [n for n, k, s in recent if n in ('Grep', 'Read', 'Glob')]
 if len(explor) >= 6:
     reasons.append(
         f"{len(explor)} Grep/Read/Glob calls in last {WINDOW} tool calls — "
@@ -407,33 +378,33 @@ if len(explor) >= 6:
 
 # 6) Same WebFetch URL hit repeatedly — almost always a "didn't read the
 #    answer last time" tell.
-wf_keys = [k[1] for n, k, _ in recent if n == 'WebFetch']
-for u, n in Counter(wf_keys).most_common(2):
-    if n >= 3:
-        reasons.append(f"WebFetch on {u!r} x{n} — page content is in context already")
+wf_keys = [k for n, k, s in recent if n == 'WebFetch']
+for u, cnt in Counter(wf_keys).most_common(2):
+    if cnt >= 3:
+        reasons.append(f"WebFetch on {u!r} x{cnt} — page content is in context already")
         break
 
 # 7) MCP result accumulation — each call's response stays in context for
 #    the rest of the session. When a server is hit repeatedly, the payloads
 #    pile up fast. /compact is the only flush mechanism mid-session.
 mcp_by_server = Counter()
-for n, k, _ in recent:
+for n, k, s in recent:
     if n.startswith('mcp__'):
         parts = n.split('__')
         if len(parts) >= 2 and parts[1]:
             mcp_by_server[parts[1]] += 1
 fired_mcp = False
-for server, n in mcp_by_server.most_common(2):
-    if n >= 5:
+for server, cnt in mcp_by_server.most_common(2):
+    if cnt >= 5:
         reasons.append(
-            f"{n} '{server}' MCP calls in last {WINDOW} tool calls — "
+            f"{cnt} '{server}' MCP calls in last {WINDOW} tool calls — "
             f"each response stays in context; /compact to flush before continuing"
         )
         fired_mcp = True
         break
 total_mcp = sum(mcp_by_server.values())
 if not fired_mcp and total_mcp >= 10:
-    srv_list = ', '.join(f"{s} ({c}x)" for s, c in mcp_by_server.most_common(3))
+    srv_list = ', '.join(f"{s2} ({c2}x)" for s2, c2 in mcp_by_server.most_common(3))
     reasons.append(
         f"{total_mcp} MCP calls in last {WINDOW} tool calls ({srv_list}) — "
         f"responses accumulate in context; /compact to flush before continuing"
@@ -444,8 +415,7 @@ if not fired_mcp and total_mcp >= 10:
 #    row-by-row reformatting) instead of scripting it. A single tested script
 #    does the same work faster, cheaper, and reproducibly.
 OUTPUT_THRESH = 3000
-recent_msgs = msg_stats[-WINDOW:]
-high_out_no_script = [o for o, has_s in recent_msgs if o >= OUTPUT_THRESH and not has_s]
+high_out_no_script = [o for o, has_s in msg_stats if o >= OUTPUT_THRESH and not has_s]
 if len(high_out_no_script) >= 2:
     total_out_k = sum(high_out_no_script) // 1000
     reasons.append(
@@ -455,8 +425,86 @@ if len(high_out_no_script) >= 2:
         f"use the deterministic-toolkit skill to script it instead"
     )
 
-for r in reasons:
-    print(r)
+# --- autoCompactThreshold hint (read once here; saves two shell spawns) ---
+ac = 'default'
+show_ac = 1
+try:
+    sset = json.load(open(os.path.expanduser('~/.claude/settings.json')))
+    v = sset.get('autoCompactThreshold')
+    if v is not None:
+        ac = f'{float(v):.2f}'
+        show_ac = 1 if float(v) > 0.75 else 0
+except Exception:
+    pass
+
+emit(session_id, 0, ss, tc, lnt, nc, cost_cents, context_k, primary,
+     tx_turns, hit, lt_hit, f'${cost_cents / 100:.2f}', ac, show_ac, reasons)
+PY
+}
+
+analysis_out="$(analyze)"
+[ -z "$analysis_out" ] && exit 0
+
+{
+  read -r session_id
+  read -r stop_hook_active
+  read -r session_start
+  read -r turn_count
+  read -r last_nag_turn
+  read -r nag_count
+  read -r cost_cents
+  read -r context_k
+  read -r model
+  read -r tx_turns
+  read -r cache_hit_pct
+  read -r last_turn_cache_hit
+  read -r cost_display
+  read -r ac_thresh
+  read -r show_ac
+  ap_reasons="$(cat)"
+} <<< "$analysis_out"
+
+[ -z "$session_id" ] && exit 0
+# Stop hooks re-activate Claude when exiting 2. stop_hook_active is set on
+# that re-invocation so we don't loop.
+[ "$stop_hook_active" = "1" ] && exit 0
+
+state_file="$STATE_DIR/${session_id}.json"
+
+# Default empty values so arithmetic comparisons below don't error.
+cost_cents="${cost_cents:-0}"
+context_k="${context_k:-0}"
+tx_turns="${tx_turns:-0}"
+cache_hit_pct="${cache_hit_pct:-0}"
+last_turn_cache_hit="${last_turn_cache_hit:-0}"
+
+# Appends one nag event to nag_history and re-arms the cooldown. Called only
+# when the alert actually fires; preserves the tx block and all other state.
+record_nag() {
+  TURN="$1" COST="$2" CTX_K="$3" TRIGGERS="$4" NAGC="$5" /usr/bin/python3 - "$state_file" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+try:
+    d = json.load(open(p)) if os.path.exists(p) else {}
+except Exception:
+    d = {}
+turn = int(os.environ['TURN'])
+d['last_nag_turn'] = turn
+d['nag_count'] = int(os.environ['NAGC'])
+hist = d.get('nag_history', [])
+hist.append({
+    'turn':       turn,
+    'cost_cents': int(os.environ['COST']),
+    'context_k':  int(os.environ['CTX_K']),
+    'triggers':   [t.strip() for t in os.environ['TRIGGERS'].split(',') if t.strip()],
+})
+d['nag_history'] = hist
+try:
+    tmp = p + '.tmp'
+    json.dump(d, open(tmp, 'w'))
+    os.replace(tmp, p)
+except OSError:
+    pass
 PY
 }
 
@@ -487,23 +535,6 @@ print(format_token_count(total))
 PY
 }
 
-{ read -r session_start; read -r turn_count; read -r last_nag_turn; read -r nag_count; } < <(read_state)
-
-# First turn: stamp session start.
-if [ "$session_start" -eq 0 ]; then
-  session_start="$now"
-fi
-turn_count=$(( turn_count + 1 ))
-
-# Parse transcript (graceful: outputs zeros if file missing or unreadable).
-{ read -r cost_cents; read -r context_k; read -r model; read -r tx_turns; read -r cache_hit_pct; read -r last_turn_cache_hit; } < <(parse_transcript)
-# Default empty values so arithmetic comparisons below don't error.
-cost_cents="${cost_cents:-0}"
-context_k="${context_k:-0}"
-tx_turns="${tx_turns:-0}"
-cache_hit_pct="${cache_hit_pct:-0}"
-last_turn_cache_hit="${last_turn_cache_hit:-0}"
-
 # Window mode only runs when the user has set a token setpoint. The index
 # scan is cheap but pointless when nothing reads its output.
 window_tokens_total=0
@@ -514,10 +545,10 @@ if [ "$WINDOW_TOKENS_THRESH" -gt 0 ]; then
 fi
 
 # Check cooldown: skip if we nagged recently and haven't hit cooldown turn yet.
+# State (turn count, tx block) was already saved by the analysis pass.
 if [ "$last_nag_turn" -gt 0 ]; then
   turns_since_nag=$(( turn_count - last_nag_turn ))
   if [ "$turns_since_nag" -lt "$COOLDOWN_TURNS" ]; then
-    write_state "$session_start" "$turn_count" "$last_nag_turn" "$nag_count"
     exit 0
   fi
 fi
@@ -530,11 +561,6 @@ should_nag=0
 reasons=""
 trigger_types=""   # comma-separated: cost,antipattern,time,turns,context,cache_hit,cache_drop,window
 
-# Pre-format the cost so the header can show it whether or not cost is what
-# triggered the nag.
-cost_display=$(COST_CENTS="${cost_cents:-0}" /usr/bin/python3 -c \
-  "import os; print(f'\${int(os.environ[\"COST_CENTS\"])/100:.2f}')" 2>/dev/null || echo "\$$((${cost_cents:-0} / 100))")
-
 # Cost: the canonical trigger. $50 default, raise via env if you want quieter.
 if [ "$cost_cents" -ge "$COST_THRESH" ]; then
   should_nag=1
@@ -543,15 +569,13 @@ if [ "$cost_cents" -ge "$COST_THRESH" ]; then
 fi
 
 # Antipattern triggers fire regardless of cost — catch waste while it's cheap.
-has_grep_antipattern=0
-if [ "$ANTIPATTERN_DETECT" = "1" ]; then
+if [ "$ANTIPATTERN_DETECT" = "1" ] && [ -n "$ap_reasons" ]; then
   while IFS= read -r ap_reason; do
     [ -z "$ap_reason" ] && continue
     should_nag=1
     trigger_types+="antipattern,"
     reasons+="  •  antipattern: ${ap_reason}"$'\n'
-    echo "$ap_reason" | grep -q "Grep/Read/Glob" && has_grep_antipattern=1
-  done < <(detect_antipatterns)
+  done <<< "$ap_reasons"
 fi
 
 # Opt-in triggers: each fires only when its setpoint is set to a non-zero
@@ -596,7 +620,6 @@ if [ "$WINDOW_TOKENS_THRESH" -gt 0 ] && [ "$window_tokens_total" -ge "$WINDOW_TO
 fi
 
 if [ "$should_nag" -eq 0 ]; then
-  write_state "$session_start" "$turn_count" "$last_nag_turn" "$nag_count"
   exit 0
 fi
 
@@ -639,29 +662,10 @@ case "$model" in
     ;;
 esac
 # Auto-compact threshold: offer when context is substantial and the current
-# threshold leaves room to lower it. Reading default (~0.9) vs. explicit value
-# so we can show the user what they have and what we're suggesting.
-if [ "${context_k:-0}" -ge 50 ]; then
-  ac_thresh=$(/usr/bin/python3 -c "
-import json, os
-p = os.path.expanduser('~/.claude/settings.json')
-try:
-    d = json.load(open(p))
-    v = d.get('autoCompactThreshold')
-    print('default' if v is None else f'{float(v):.2f}')
-except Exception:
-    print('default')
-" 2>/dev/null || echo "default")
-  # Show if threshold is at default (implied ~0.90) or explicitly above 0.75.
-  show_ac=0
-  if [ "$ac_thresh" = "default" ]; then
-    show_ac=1
-  elif /usr/bin/python3 -c "import sys; exit(0 if float(sys.argv[1]) > 0.75 else 1)" "$ac_thresh" 2>/dev/null; then
-    show_ac=1
-  fi
-  if [ "$show_ac" -eq 1 ]; then
-    options+="\"Lower autoCompactThreshold (${ac_thresh}) → 0.70 in ~/.claude/settings.json — auto-compact fires at 70% context fill\""$'\n'
-  fi
+# threshold leaves room to lower it (at default ~0.90, or explicitly above
+# 0.75). ac_thresh/show_ac come from the analysis pass.
+if [ "${context_k:-0}" -ge 50 ] && [ "${show_ac:-0}" = "1" ]; then
+  options+="\"Lower autoCompactThreshold (${ac_thresh}) → 0.70 in ~/.claude/settings.json — auto-compact fires at 70% context fill\""$'\n'
 fi
 options+='"/clear — fresh start (best when pivoting tasks)"'$'\n'
 options+='"Continue"'$'\n'
@@ -700,8 +704,7 @@ fi
 msg+=$'\n'
 msg+="After the user responds, execute their choice. Don't fire again unless setpoints are crossed again."
 
-write_state "$session_start" "$turn_count" "$turn_count" "$nag_count"
-append_nag_event "$turn_count" "${cost_cents:-0}" "${context_k:-0}" "$trigger_types"
+record_nag "$turn_count" "${cost_cents:-0}" "${context_k:-0}" "$trigger_types" "$nag_count"
 
 printf '%s\n' "$msg" 1>&2
 exit 2

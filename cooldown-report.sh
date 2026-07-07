@@ -49,7 +49,7 @@ REPORT_FILE="${CLAUDE_COOLDOWN_FILE:-$REPORT_DIR/${session_id}.md}"
 mkdir -p "$(dirname "$REPORT_FILE")"
 
 /usr/bin/python3 - "$transcript_path" "$session_id" "$reason" "$REPORT_FILE" "$LOG" "$session_start" "$state_file" "$TUNING_FILE" <<'PY'
-import json, os, sys, re
+import json, os, sys, re, time
 from collections import Counter, defaultdict
 from datetime import datetime
 
@@ -57,6 +57,7 @@ sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
 from _lib import (
     is_real_user, in_session, turn_cost_usd, dedupe_turn, lookup_pricing,
     update_window_index, tokens_in_window, format_token_count,
+    _SONNET_5_INTRO_END,
 )
 
 path, session_id, reason, report_file, log_file = sys.argv[1:6]
@@ -77,6 +78,18 @@ seen_msg_ids = set()  # dedupe re-appended assistant rows for tool-call counts
 user_prompts = []
 thinking_blocks = 0   # count of extended-thinking content blocks (bill as output)
 first_ts = last_ts = None
+usage_seq = []            # (ts_unix, model, usage) per unique assistant API call
+first_overhead = None     # input+cache_write of the first API call = session-start context
+tool_errors = 0           # tool_result blocks that came back is_error
+read_seq = []             # ordered Read file paths (post-compact re-read check)
+compact_read_pos = None   # len(read_seq) at the most recent compact boundary
+compacts = 0
+
+def _ts_unix(ts):
+    try:
+        return datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp()
+    except Exception:
+        return 0
 
 def user_text(obj):
     c = obj.get('message', {}).get('content')
@@ -106,6 +119,10 @@ with open(path, encoding='utf-8', errors='replace') as f:
             if ts:
                 if not first_ts: first_ts = ts
                 last_ts = ts
+            _uc = obj.get('message', {}).get('content')
+            if isinstance(_uc, list):
+                tool_errors += sum(1 for x in _uc if isinstance(x, dict)
+                                   and x.get('type') == 'tool_result' and x.get('is_error'))
             if is_real_user(obj):
                 txt = user_text(obj)
                 if txt: user_prompts.append(txt)
@@ -132,6 +149,12 @@ with open(path, encoding='utf-8', errors='replace') as f:
                 continue
             if mid:
                 seen_msg_ids.add(mid)
+            if usage:
+                _ov = ((usage.get('input_tokens', 0) or 0)
+                       + (usage.get('cache_creation_input_tokens', 0) or 0))
+                if first_overhead is None:
+                    first_overhead = _ov
+                usage_seq.append((_ts_unix(ts), m or current_model or 'unknown', usage))
             content = msg.get('content', [])
             if isinstance(content, list):
                 for c in content:
@@ -142,6 +165,8 @@ with open(path, encoding='utf-8', errors='replace') as f:
                         inp = c.get('input') or {}
                         if name == 'Read':
                             key = (inp.get('file_path') or '').strip()
+                            if key:
+                                read_seq.append(key)
                         elif name in ('Edit', 'Write', 'MultiEdit', 'NotebookEdit'):
                             key = (inp.get('file_path') or inp.get('notebook_path') or '').strip()
                         elif name == 'Bash':
@@ -155,6 +180,10 @@ with open(path, encoding='utf-8', errors='replace') as f:
                         else:
                             key = ''
                         tool_calls.append((name, key, inp, len(turns)))
+        elif t == 'system':
+            if obj.get('subtype') == 'compact_boundary' and in_session(obj, start_unix):
+                compacts += 1
+                compact_read_pos = len(read_seq)
 if current:
     turns.append(current)
     model_per_turn.append(current_model or 'unknown')
@@ -451,6 +480,82 @@ if len(high_output_inline) >= 2:
         f"and reformatting are not."
     ))
 
+# 14) Fixed session-start overhead — the first API call's input+cache_write is
+#     the context loaded before the first word: CLAUDE.md, rules, memory files,
+#     MCP tool schemas. Every session pays to write it and every turn to read it.
+if first_overhead and first_overhead >= 30_000:
+    suggestions.append((
+        'context',
+        f"Session-start overhead was {first_overhead//1000}K tokens loaded before your first prompt "
+        f"(CLAUDE.md, rules, memory, MCP tool schemas). Every session re-caches this and every turn "
+        f"re-reads it — run `/context` for the breakdown, move big rules into on-demand skills, "
+        f"and `/mcp` to disable idle servers"
+    ))
+
+# 15) Cache expirations — the prompt cache TTL is 5 minutes. A call that
+#     follows a longer idle gap re-writes the context at 1.25x input instead
+#     of reading it at 0.1x. Detected: >5.5min gap AND a large cache_write on
+#     the following call.
+expiries = 0
+expiry_wasted_usd = 0.0
+_prev_ts = None
+for _tsu, _mdl, _u in usage_seq:
+    _cw = _u.get('cache_creation_input_tokens', 0) or 0
+    if _prev_ts and _tsu and _tsu - _prev_ts > 330 and _cw > 20_000:
+        _p = lookup_pricing(_mdl)
+        expiries += 1
+        expiry_wasted_usd += _cw * (_p[1] - _p[2]) / 1_000_000
+    if _tsu:
+        _prev_ts = _tsu
+if expiries >= 2:
+    suggestions.append((
+        'cache',
+        f"{expiries} cache expiration(s): turns that followed a >5min idle gap re-wrote the full "
+        f"context (~${expiry_wasted_usd:.2f} extra vs a warm cache — the 5-minute cache TTL had "
+        f"lapsed). Batch prompts while the cache is warm, or close the session when stepping away"
+    ))
+
+# 16) Failed tool calls — each errored tool_result costs a full round-trip and
+#     the error text stays in context. Recurring failures usually trace to one
+#     fixable cause: a permission rule, a blocking hook, or a wrong path.
+if tool_errors >= 5:
+    suggestions.append((
+        'tool',
+        f"{tool_errors} tool calls returned errors this session — each failure costs a full API "
+        f"round-trip and the error output stays in context. Recurring denials/failures usually "
+        f"trace to one fixable cause: a permission rule, a blocking hook, or a wrong path"
+    ))
+
+# 17) Post-compact re-reads — files read before auto-compaction and again after
+#     it are paid for twice: once into the original context, once more after
+#     the summary dropped them.
+if compacts and compact_read_pos is not None:
+    _pre = set(read_seq[:compact_read_pos])
+    _post = read_seq[compact_read_pos:]
+    re_read = sorted({k for k in _post if k in _pre})
+    if len(re_read) >= 2:
+        _sample = ', '.join(f'`{os.path.basename(k)}`' for k in re_read[:3])
+        if len(re_read) > 3:
+            _sample += ', …'
+        suggestions.append((
+            'context',
+            f"{len(re_read)} file(s) re-read after compaction ({_sample}) — compaction dropped "
+            f"content you paid to read, then you paid to read it again. Steer it with "
+            f"`/compact <what to keep>`, or checkpoint (commit + push) and start fresh before it triggers"
+        ))
+
+# 18) Sonnet 5 introductory pricing ends 2026-09-01 — flag when the flip is
+#     close so the cost jump doesn't read as a regression.
+if any('sonnet-5' in m for m in per_model_usd):
+    _days_left = int((_SONNET_5_INTRO_END - time.time()) // 86400)
+    if 0 <= _days_left <= 45:
+        suggestions.append((
+            'pricing',
+            f"Heads-up: Sonnet 5 introductory pricing ($2/$10 per MTok) ends 2026-09-01 "
+            f"({_days_left} days) — costs will rise ~50% at standard rates ($3/$15). "
+            f"Not a regression when it happens"
+        ))
+
 # --- tuning: update cross-session history and detect config patterns -----------
 
 def _load_tuning(path):
@@ -585,6 +690,10 @@ _paid = total_in + total_cw
 _hit  = total_cr / max(total_cr + _paid, 1)
 _hit_hint = "higher = cheaper" if cost_mode == 'api' else "higher = uses less quota"
 lines.append(f"- **Cache hit:** {_hit*100:.0f}% ({_hit_hint}; <40% suggests context churn)")
+if first_overhead:
+    lines.append(f"- **Session-start overhead:** {first_overhead//1000}K tokens loaded before the first prompt")
+if compacts:
+    lines.append(f"- **Compactions:** {compacts} (context was summarized mid-session)")
 
 # Rolling-window approximation (subscription-quota stand-in). Only included
 # if the user has opted in by setting CLAUDE_THERMOSTAT_WINDOW_TOKENS. The
@@ -627,8 +736,10 @@ if suggestions:
         'model':  'Model choice',
         'prompt': 'Prompt patterns',
         'context':'Context hygiene',
+        'cache':  'Cache economics',
+        'pricing':'Pricing changes',
     }
-    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'prompt'):
+    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'cache', 'prompt', 'pricing'):
         if kind not in by_kind: continue
         lines.append(f"### {titles[kind]}")
         for s in by_kind[kind]:
@@ -720,7 +831,7 @@ if suggestions:
     by_kind = defaultdict(list)
     for kind, s in suggestions:
         by_kind[kind].append(s)
-    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'prompt'):
+    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'cache', 'prompt', 'pricing'):
         if kind not in by_kind: continue
         print(f"\n  {titles[kind]}:", file=sys.stderr)
         for s in by_kind[kind]:
