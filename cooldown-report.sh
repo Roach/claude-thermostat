@@ -202,12 +202,15 @@ if current:
 # turn_cost_usd handles dedupe + dated model-id prefix matching.
 total_usd = 0.0
 per_model_usd = Counter()
+per_model_tokens = defaultdict(lambda: [0, 0, 0, 0])  # in, cache_write, cache_read, out
 total_in = total_cw = total_cr = total_out = 0
 for turn, model in zip(turns, model_per_turn):
     if not turn: continue
     cost, inp, cw, cr, out = turn_cost_usd(turn, model, mode=cost_mode)
     total_usd += cost
     per_model_usd[model] += cost
+    pmt = per_model_tokens[model]
+    pmt[0] += inp; pmt[1] += cw; pmt[2] += cr; pmt[3] += out
     total_in += inp; total_cw += cw; total_cr += cr; total_out += out
 
 # --- duration ---
@@ -713,6 +716,15 @@ if per_model_usd:
     if parts:
         lines.append(f"- **By model:** {parts}")
 lines.append(f"- **Tokens:** in={total_in:,} cache_write={total_cw:,} cache_read={total_cr:,} out={total_out:,}")
+_active_models = [m for m, t in per_model_tokens.items() if sum(t) > 0]
+if len(_active_models) > 1:
+    for m, c in per_model_usd.most_common():
+        t = per_model_tokens.get(m)
+        if not t or sum(t) == 0: continue
+        lines.append(
+            f"  - {m.replace('claude-','')}: in={t[0]:,} cache_write={t[1]:,} "
+            f"cache_read={t[2]:,} out={t[3]:,}"
+        )
 _paid = total_in + total_cw
 _hit  = total_cr / max(total_cr + _paid, 1)
 _hit_hint = "higher = cheaper" if cost_mode == 'api' else "higher = uses less quota"
@@ -840,12 +852,24 @@ with open(log_file, 'a') as f:
 
 # Print the full suggestion list to stderr so it's visible in the terminal
 # as the session closes — not just the one-line pointer.
+_tty = sys.stderr.isatty() and not os.environ.get('NO_COLOR')
+def _c(code, s):
+    return f"\033[{code}m{s}\033[0m" if _tty else s
+BOLD, DIM = '1', '2'
+CYAN, YELLOW, GREEN, RED, BLUE = '36', '33', '32', '31', '34'
+
+_hit_color = GREEN if _hit >= 0.7 else (YELLOW if _hit >= 0.4 else RED)
 print('', file=sys.stderr)
-print(f"━━━ cooldown-report ━━━  ${total_usd:.2f} · {len(turns)} turns · {dur_min or '?'} · {_hit*100:.0f}% cached", file=sys.stderr)
+print(
+    f"{_c(DIM, '━━━')} {_c(f'{BOLD};{CYAN}', 'cooldown-report')}  "
+    f"{_c(f'{BOLD};{YELLOW}', f'${total_usd:.2f}')} · {len(turns)} turns · "
+    f"{dur_min or '?'} · {_c(_hit_color, f'{_hit*100:.0f}% cached')} {_c(DIM, '━━━')}",
+    file=sys.stderr,
+)
 if per_model_usd:
     parts = ', '.join(f"{m.replace('claude-','')}=${c:.2f}" for m, c in per_model_usd.most_common() if round(c, 2) > 0)
     if parts:
-        print(f"  models: {parts}", file=sys.stderr)
+        print(f"  {_c(DIM, 'models:')} {parts}", file=sys.stderr)
 if suggestions:
     titles = {
         'model':  'Model choice',
@@ -862,19 +886,20 @@ if suggestions:
         by_kind[kind].append(s)
     for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'cache', 'prompt', 'pricing'):
         if kind not in by_kind: continue
-        print(f"\n  {titles[kind]}:", file=sys.stderr)
+        print(f"\n  {_c(BOLD, titles[kind])}:", file=sys.stderr)
         for s in by_kind[kind]:
             # wrap-aware indent for readability
-            print(f"    • {s}", file=sys.stderr)
+            print(f"    {_c(YELLOW, '•')} {s}", file=sys.stderr)
 else:
-    print("  No notable inefficiencies detected.", file=sys.stderr)
+    print(f"\n  {_c(GREEN, 'No notable inefficiencies detected.')}", file=sys.stderr)
 if tuning_suggs:
-    print(f"\n  Configuration tuning ({len(tuning['sessions'])} sessions on record):", file=sys.stderr)
+    _n_sessions = len(tuning['sessions'])
+    print(f"\n  {_c(BOLD, 'Configuration tuning')} {_c(DIM, f'({_n_sessions} sessions on record)')}:", file=sys.stderr)
     for s in tuning_suggs:
-        print(f"    ◆ {s}", file=sys.stderr)
-print(f"\n  Full report: {report_file}", file=sys.stderr)
-print(f"  Review with Claude: claude \"Review my thermostat cooldown report at {report_file} and help me apply the top suggestion\"", file=sys.stderr)
-print('━' * 60, file=sys.stderr)
+        print(f"    {_c(BLUE, '◆')} {s}", file=sys.stderr)
+print(f"\n  {_c(DIM, 'Full report:')} {report_file}", file=sys.stderr)
+print(f"  {_c(DIM, 'Review with Claude:')} claude \"Review my thermostat cooldown report at {report_file} and help me apply the top suggestion\"", file=sys.stderr)
+print(_c(DIM, '━' * 60), file=sys.stderr)
 PY
 
 exit 0

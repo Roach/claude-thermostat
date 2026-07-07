@@ -75,8 +75,10 @@ The report opens with an H1 heading followed by a bulleted metadata block:
 - **Duration:** <N> min
 - **Turns:** <N>
 - **Cost:** $<N.NN>  _— <COST_MODE_LABEL>_
-- **By model:** <MODEL>=<$COST>, ...          ← omitted when only one model
+- **By model:** <MODEL>=<$COST>, ...
 - **Tokens:** in=<N> cache_write=<N> cache_read=<N> out=<N>
+  - <MODEL>: in=<N> cache_write=<N> cache_read=<N> out=<N>
+               ← one line per model, only present when 2+ models were used
 - **Cache hit:** <N>%  (<hint>; <threshold note>)
 - **Session-start overhead:** <N>K tokens loaded before the first prompt
                ← omitted when the first API call couldn't be identified
