@@ -425,7 +425,7 @@ if turns and turns[-1]:
 if thinking_blocks >= 20 and total_out > 60_000:
     suggestions.append((
         'model',
-        f"{thinking_blocks} extended-thinking blocks and {total_out//1000}K output tokens this session — thinking bills as output. If much of this was routine, lower reasoning effort with `/effort` (or `MAX_THINKING_TOKENS=8000`) and reserve deep thinking for hard problems"
+        f"{thinking_blocks} extended-thinking blocks and {total_out//1000}K output tokens this session — thinking bills as output. If much of this was routine, lower reasoning effort with `/effort` (or `MAX_THINKING_TOKENS=8000`), or add \"Prioritize responding quickly rather than thinking deeply; when in doubt, respond directly\" to CLAUDE.md for low-stakes work (per Anthropic's Opus 4.7 best-practices guide). Reserve deep thinking for hard problems"
     ))
 
 # 11) MCP surface — tool definitions load into context, and CLI equivalents
@@ -483,8 +483,8 @@ if len(high_output_inline) >= 2:
         'tool',
         f"{len(high_output_inline)} turns with ≥{OUTPUT_INLINE_THRESH} output tokens and no Bash/Write "
         f"({_total_inline_out//1000}K tokens total) — model may have computed or reformatted data "
-        f"inline instead of scripting it. Install the deterministic-toolkit skill "
-        f"(`~/.claude/skills/`) for mechanical work: parsing, converting formats, deduping, "
+        f"inline instead of scripting it. Install the deterministic-toolkit skill shipped "
+        f"with claude-thermostat (`skills/deterministic-toolkit.md`) for mechanical work: parsing, converting formats, deduping, "
         f"aggregating, validating, diffing. Scripts are deterministic; in-context arithmetic "
         f"and reformatting are not."
     ))

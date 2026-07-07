@@ -29,11 +29,16 @@ When the cost setpoint is crossed (or an antipattern is detected — see below),
 - `thermostat-status.sh` — on-demand status query; used by the `/thermostat` skill
 - `weekly-trend.sh` — 7-day (or N-day) cost/antipattern trend from cooldown reports
 - `project-audit.sh` — aggregate cooldown reports across all sessions for a project, surfacing recurring skill candidates, bash patterns, and structural gaps
+- `context-audit.sh` — static audit of the always-on context surface (CLAUDE.md files, rules, skill/agent descriptions, MCP servers); used by the `/thermostat-audit` skill
+- `idle-notify.sh` — optional `Notification`-hook desktop alert when Claude is blocked waiting on input
 - `print-latest-cooldown.sh` — optional terminal pretty-printer for the report (call from a `claude` shell wrapper after the process exits)
 - `_lib.py` — shared pricing, dedup, and session-filter helpers
 - `skills/thermostat.md` — Claude Code skill for `/thermostat`
 - `skills/thermostat-week.md` — Claude Code skill for `/thermostat-week`
 - `skills/thermostat-project.md` — Claude Code skill for `/thermostat-project`
+- `skills/thermostat-audit.md` — Claude Code skill for `/thermostat-audit`
+- `skills/thermostat-checkpoint.md` — Claude Code skill for `/thermostat-checkpoint` (handoff primer + fresh-session ritual)
+- `skills/deterministic-toolkit.md` — remediation skill for the "inline deterministic work" detector: route mechanical data work to scripts
 - `docs/report-format.md` — stable format spec for `reports.log` and cooldown report files
 
 ## Session state
@@ -112,7 +117,7 @@ The report includes:
 - Cost, duration, turn count, per-model breakdown, token totals
 - **Cache hit %** — higher is cheaper; <40% suggests context churn (big auto-loading rules, frequent /clear)
 - **Skill candidates** — files Read 3+ times, URLs WebFetched 2+ times, Grep patterns repeated 3+ times. These are reference material that should live in a skill.
-- **Tool choice** — if Grep/Read/Glob dominated, suggests `mcp__auggie__codebase-retrieval` for natural-language lookups; if context grew large with no subagent use, suggests delegating.
+- **Tool choice** — if Grep/Read/Glob dominated, suggests `mcp__auggie__codebase-retrieval` for natural-language lookups; if context grew large with no subagent use, suggests delegating. (Auggie is one example — the detector fires on the grep-chain pattern, not the tool; any codebase-retrieval MCP or a pre-built code index like [codegraph](https://github.com/colbymchenry/codegraph) addresses it.)
 - **Model choice** — if Opus dominated cost and produced many small outputs, flags downgrade candidates.
 - **Model switches mid-session** — flags any model change that resets the KV cache, naming the turn and models, and explains the per-turn cost penalty on cache-cold turns.
 - **Prompt patterns** — many short prompts → suggests one-shot patterns per Anthropic's Opus 4.7 best-practices.
@@ -326,6 +331,57 @@ ln -s /path/to/claude-thermostat/skills/thermostat-project.md ~/.claude/skills/t
 ```
 
 Then type `/thermostat-project` in any session. The skill audits the current working directory by default; name a project or path in your message to target a different one.
+
+## Context surface audit (`/thermostat-audit` skill)
+
+The cooldown report measures what a session *spent*; `context-audit.sh` measures what every session *starts with* — the always-on config surface loaded before your first prompt. It runs against files, not transcripts, so you can trim the surface before paying for it:
+
+```
+━━━ context-audit ━━━  /Users/you/projects/myapp
+
+Always-on surface (loaded before your first prompt): ~14,210 tokens
+
+   9,102  project CLAUDE.md  (/Users/you/projects/myapp/CLAUDE.md)
+   3,340  ~/.claude/rules/ (6 file(s))
+   1,268  skill descriptions (11 skill(s))
+     595  global CLAUDE.md  (/Users/you/.claude/CLAUDE.md)
+        -  MCP servers configured (3)  auggie, chrome-devtools, linear
+
+Flags:
+  • `myapp/CLAUDE.md` is ~9,102 tokens of always-on context — move reference material into on-demand skills
+  • MCP server(s) configured but unused across the last 15 sessions: linear — each loads its tool schemas into every session
+```
+
+It checks: global and project `CLAUDE.md` size, `~/.claude/rules/` totals, skill and agent **description** length (descriptions load every session even when the skill is never used — the discovery tax), the auto-memory index, and MCP servers configured vs actually used in recent cooldown reports. Pairs with the report's **Session-start overhead** signal: that number tells you the tax exists, this tells you what it's made of.
+
+```bash
+./context-audit.sh              # audit cwd
+./context-audit.sh ~/projects/myapp
+```
+
+Install the skill: `ln -s /path/to/claude-thermostat/skills/thermostat-audit.md ~/.claude/skills/thermostat-audit.md`, then `/thermostat-audit`.
+
+## Checkpoint handoff (`/thermostat-checkpoint` skill)
+
+The alert's "close and reopen" option and the report's long-session signals all point at the same ritual: commit + push, start fresh. The `/thermostat-checkpoint` skill makes the ritual structured instead of ad-hoc — it commits completed work, then writes a handoff primer (`.claude-checkpoint.md`) capturing **decisions and dead ends, not activity**: what was decided and why, what failed and why it shouldn't be retried, open questions ranked by value, and a copy-paste continuation prompt for the fresh session. Git history carries *what changed*; the primer carries the three things git can't.
+
+Install: `ln -s /path/to/claude-thermostat/skills/thermostat-checkpoint.md ~/.claude/skills/thermostat-checkpoint.md`, then `/thermostat-checkpoint` when an alert fires or a work chunk completes.
+
+## Idle notifications
+
+An open session that sits idle burns money quietly: every gap past the 5-minute cache TTL means the next turn re-writes the full context at 1.25× instead of reading it at 0.1× (the report's **Cache expirations** signal), and sessions left open for hours drift into the **Multi-day session** pattern. `idle-notify.sh` fires a desktop notification (macOS `osascript`, Linux `notify-send`) whenever Claude Code is blocked waiting on you — answer it or close it.
+
+```json
+"Notification": [
+  { "hooks": [ { "type": "command",
+      "command": "/abs/path/to/claude-thermostat/idle-notify.sh" } ] }
+]
+```
+
+## Pairs well with
+
+- **Terse-output plugins** — e.g. [caveman](https://github.com/JuliusBrussee/caveman), which enforces radically short responses (~75% fewer output tokens by its own benchmark). The thermostat's per-session token totals make a clean before/after measurement if you trial one.
+- **Codebase-retrieval MCPs / code indexes** — the remediation for the grep-chain and repeated-source-read detectors; see the Tool choice note above.
 
 ## Report format
 

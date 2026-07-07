@@ -7,6 +7,8 @@ Hooks that watch Claude Code session cost and produce a post-session cooldown re
 - `claude-thermostat.sh` — in-session cost-threshold alert, invoked by the `Stop` event
 - `cooldown-report.sh` — post-session cost-reduction post-mortem, invoked by the `SessionEnd` event; writes to `~/.claude/thermostat/reports/<session_id>.md` and appends a line to `~/.claude/thermostat/reports.log`
 - `print-latest-cooldown.sh` — pretty-prints a cooldown report to the terminal (intended for use from a `claude` shell wrapper after the process exits)
+- `context-audit.sh` — static audit of the always-on config surface (CLAUDE.md, rules, skill/agent descriptions, configured-vs-used MCP servers); transcript-independent
+- `idle-notify.sh` — optional `Notification`-hook desktop alert when Claude is blocked on input
 - `_lib.py` — shared pricing table, dedup helpers, session-filter helpers
 - State files: `~/.claude/thermostat/<session_id>.json`
 - Optional config: `~/.claude/thermostat/config.env` (sourced at the top of the thermostat hook; overrides env vars)
