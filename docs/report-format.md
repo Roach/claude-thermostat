@@ -110,8 +110,8 @@ The eight category headings are **stable**:
 |---|---|
 | `Model choice` | A premium-tier model (Opus/Fable) used on turns that Sonnet or Haiku would have handled |
 | `New skills to consider` | Reference/config files (`.md`, `.yaml`, `.json`, etc.) re-read 3+ times; skill candidates |
-| `Better search tool for source files` | Source code files (`.py`, `.ts`, `.js`, `.go`, etc.) re-read 3+ times; use `mcp__auggie__codebase-retrieval` instead |
-| `Better tool choices` | Grep/Read chains that Auggie or a subagent would replace; repeated failed tool calls |
+| `Better search tool for source files` | Source code files (`.py`, `.ts`, `.js`, `.go`, etc.) re-read 3+ times; use `mcp__codegraph__codegraph_explore` instead |
+| `Better tool choices` | Grep/Read chains that CodeGraph or a subagent would replace; repeated failed tool calls |
 | `Context hygiene` | Low cache hit rate, model switches, large context, session-start overhead, post-compact re-reads |
 | `Cache economics` | Cache expirations from idle gaps longer than the 5-minute TTL |
 | `Prompt patterns` | Short prompt chains, clarification-loop patterns |

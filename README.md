@@ -117,7 +117,7 @@ The report includes:
 - Cost, duration, turn count, per-model breakdown, token totals
 - **Cache hit %** — higher is cheaper; <40% suggests context churn (big auto-loading rules, frequent /clear)
 - **Skill candidates** — files Read 3+ times, URLs WebFetched 2+ times, Grep patterns repeated 3+ times. These are reference material that should live in a skill.
-- **Tool choice** — if Grep/Read/Glob dominated, suggests `mcp__auggie__codebase-retrieval` for natural-language lookups; if context grew large with no subagent use, suggests delegating. (Auggie is one example — the detector fires on the grep-chain pattern, not the tool; any codebase-retrieval MCP or a pre-built code index like [codegraph](https://github.com/colbymchenry/codegraph) addresses it.)
+- **Tool choice** — if Grep/Read/Glob dominated, suggests `mcp__codegraph__codegraph_explore` for natural-language lookups; if context grew large with no subagent use, suggests delegating. (CodeGraph is one example — the detector fires on the grep-chain pattern, not the tool; any codebase-retrieval MCP or a pre-built code index like [CodeGraph](https://github.com/colbymchenry/codegraph) addresses it.)
 - **Model choice** — if Opus dominated cost and produced many small outputs, flags downgrade candidates.
 - **Model switches mid-session** — flags any model change that resets the KV cache, naming the turn and models, and explains the per-turn cost penalty on cache-cold turns.
 - **Prompt patterns** — many short prompts → suggests one-shot patterns per Anthropic's Opus 4.7 best-practices.
@@ -345,7 +345,7 @@ Always-on surface (loaded before your first prompt): ~14,210 tokens
    3,340  ~/.claude/rules/ (6 file(s))
    1,268  skill descriptions (11 skill(s))
      595  global CLAUDE.md  (/Users/you/.claude/CLAUDE.md)
-        -  MCP servers configured (3)  auggie, chrome-devtools, linear
+        -  MCP servers configured (3)  codegraph, chrome-devtools, linear
 
 Flags:
   • `myapp/CLAUDE.md` is ~9,102 tokens of always-on context — move reference material into on-demand skills

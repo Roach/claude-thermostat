@@ -229,8 +229,8 @@ suggestions = []
 # 1) Skill candidates: same file Read 3+ times, same WebFetch URL 2+ times,
 #    same Grep pattern 3+ times — these are reference material that should
 #    live in a skill (loaded once, on-demand).
-#    Source code files (.py, .ts, .js, etc.) go to an "auggie" bucket instead —
-#    they should be queried via mcp__auggie__codebase-retrieval, not bundled
+#    Source code files (.py, .ts, .js, etc.) go to a "codegraph" bucket instead —
+#    they should be queried via mcp__codegraph__codegraph_explore, not bundled
 #    into a skill.
 SKILL_EXTS = {
     '.md', '.html', '.htm', '.yaml', '.yml', '.json', '.toml', '.txt',
@@ -257,8 +257,8 @@ for f, n in read_counts.most_common(8):
     ext = _ext(f)
     if ext in SOURCE_EXTS:
         suggestions.append((
-            'auggie',
-            f"Read `{f}` {n}× — use `mcp__auggie__codebase-retrieval` for lookups into this file instead of re-reading it"
+            'codegraph',
+            f"Read `{f}` {n}× — use `mcp__codegraph__codegraph_explore` (or `codegraph explore` in-shell) for lookups into this file instead of re-reading it"
         ))
     else:
         suggestions.append((
@@ -280,16 +280,16 @@ for g, n in grep_counts.most_common(3):
         pat = g.split('|', 1)[0]
         suggestions.append((
             'skill',
-            f"Grep `{pat}` {n}× — same exploration repeated; consider a skill with the answer pre-written, or mcp__auggie__codebase-retrieval"
+            f"Grep `{pat}` {n}× — same exploration repeated; consider a skill with the answer pre-written, or mcp__codegraph__codegraph_explore"
         ))
 
-# 2) Auggie / grep-chain
+# 2) CodeGraph / grep-chain
 grep_read = sum(1 for n, _, _, _ in tool_calls if n in ('Grep', 'Read', 'Glob'))
 total_tools = len(tool_calls) or 1
 if grep_read >= 30 and grep_read / total_tools > 0.4:
     suggestions.append((
         'tool',
-        f"{grep_read} Grep/Read/Glob calls ({100*grep_read//total_tools}% of all tool use) — heavy codebase exploration. Try `mcp__auggie__codebase-retrieval` for natural-language lookups; one call replaces a chain"
+        f"{grep_read} Grep/Read/Glob calls ({100*grep_read//total_tools}% of all tool use) — heavy codebase exploration. Try `mcp__codegraph__codegraph_explore` for natural-language lookups; one call replaces a chain"
     ))
 
 # 3) Bash repetition
@@ -679,7 +679,7 @@ def _tuning_suggestions(sessions, cost_thresh_cents):
             suggs.append(
                 f"Antipatterns trigger {int(ap_share*100)}% of your alerts across recent "
                 f"sessions — the patterns aren't improving. Consider installing the "
-                f"Auggie MCP (`mcp__auggie__codebase-retrieval`) as your primary "
+                f"CodeGraph MCP (`mcp__codegraph__codegraph_explore`) as your primary "
                 f"codebase search: one call replaces most Grep/Read chains."
             )
 
@@ -770,7 +770,7 @@ if suggestions:
         by_kind[kind].append(s)
     titles = {
         'skill':  'New skills to consider',
-        'auggie': 'Better search tool for source files',
+        'codegraph': 'Better search tool for source files',
         'tool':   'Better tool choices',
         'model':  'Model choice',
         'prompt': 'Prompt patterns',
@@ -778,7 +778,7 @@ if suggestions:
         'cache':  'Cache economics',
         'pricing':'Pricing changes',
     }
-    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'cache', 'prompt', 'pricing'):
+    for kind in ('model', 'skill', 'codegraph', 'tool', 'context', 'cache', 'prompt', 'pricing'):
         if kind not in by_kind: continue
         lines.append(f"### {titles[kind]}")
         for s in by_kind[kind]:
@@ -874,7 +874,7 @@ if suggestions:
     titles = {
         'model':  'Model choice',
         'skill':  'New skills to consider',
-        'auggie': 'Better search tool for source files',
+        'codegraph': 'Better search tool for source files',
         'tool':   'Better tool choices',
         'context':'Context hygiene',
         'cache':  'Cache economics',
@@ -884,7 +884,7 @@ if suggestions:
     by_kind = defaultdict(list)
     for kind, s in suggestions:
         by_kind[kind].append(s)
-    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'cache', 'prompt', 'pricing'):
+    for kind in ('model', 'skill', 'codegraph', 'tool', 'context', 'cache', 'prompt', 'pricing'):
         if kind not in by_kind: continue
         print(f"\n  {_c(BOLD, titles[kind])}:", file=sys.stderr)
         for s in by_kind[kind]:

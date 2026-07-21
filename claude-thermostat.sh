@@ -367,13 +367,13 @@ for sa, cnt in Counter(agent_keys).most_common(2):
 
 # 5) Exploratory grep-chain: lots of distinct Grep + Read calls in the
 #    recent window suggests "feeling around" the codebase, which burns
-#    input tokens fast. A single Auggie codebase-retrieval call is usually
+#    input tokens fast. A single CodeGraph codebase-retrieval call is usually
 #    cheaper and more accurate.
 explor = [n for n, k, s in recent if n in ('Grep', 'Read', 'Glob')]
 if len(explor) >= 6:
     reasons.append(
         f"{len(explor)} Grep/Read/Glob calls in last {WINDOW} tool calls — "
-        f"try mcp__auggie__codebase-retrieval for natural-language lookups"
+        f"try mcp__codegraph__codegraph_explore for natural-language lookups"
     )
 
 # 6) Same WebFetch URL hit repeatedly — almost always a "didn't read the
