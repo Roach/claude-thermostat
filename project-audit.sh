@@ -132,12 +132,12 @@ if not project_entries:
 
 SECTION_RE = re.compile(r'^#{1,3}\s+(.+)$')
 SKILL_ITEM_RE  = re.compile(r'^-\s+Read\s+`([^`]+)`\s+(\d+)×')
-AUGGIE_ITEM_RE = re.compile(r'^-\s+Read\s+`([^`]+)`\s+(\d+)×')
+CODEGRAPH_ITEM_RE = re.compile(r'^-\s+Read\s+`([^`]+)`\s+(\d+)×')
 BASH_ITEM_RE   = re.compile(r'^-\s+Bash\s+`([^`]+)`\s+ran\s+(\d+)×')
 
 # Per-session data keyed by report_path
 session_skills  = defaultdict(list)   # path -> [(file, count)]  — reference files
-session_auggie  = defaultdict(list)   # path -> [(file, count)]  — source files
+session_codegraph  = defaultdict(list)   # path -> [(file, count)]  — source files
 session_bash    = defaultdict(list)   # path -> [(cmd_snippet, count)]
 session_kinds   = defaultdict(set)    # path -> {kind, ...}  (from section headings)
 session_config  = defaultdict(list)   # path -> [config suggestion lines]
@@ -161,10 +161,10 @@ for entry in project_entries:
                         session_skills[rpath].append((km.group(1), int(km.group(2))))
                     session_kinds[rpath].add('skill')
                 elif 'better search tool for source files' in current_section:
-                    am = AUGGIE_ITEM_RE.match(line)
+                    am = CODEGRAPH_ITEM_RE.match(line)
                     if am:
-                        session_auggie[rpath].append((am.group(1), int(am.group(2))))
-                    session_kinds[rpath].add('auggie')
+                        session_codegraph[rpath].append((am.group(1), int(am.group(2))))
+                    session_kinds[rpath].add('codegraph')
                 elif 'prompt patterns' in current_section:
                     bm = BASH_ITEM_RE.match(line)
                     if bm:
@@ -205,28 +205,28 @@ single_skills = [
 ]
 single_skills.sort(key=lambda x: -x[2])
 
-# ── aggregate Auggie candidates (source files) across sessions ─────────────
-auggie_sessions = defaultdict(set)   # file -> set of report paths
-auggie_reads    = Counter()          # file -> sum of read counts
+# ── aggregate CodeGraph candidates (source files) across sessions ─────────
+codegraph_sessions = defaultdict(set)   # file -> set of report paths
+codegraph_reads    = Counter()          # file -> sum of read counts
 
-for rpath, items in session_auggie.items():
+for rpath, items in session_codegraph.items():
     for fname, cnt in items:
-        auggie_sessions[fname].add(rpath)
-        auggie_reads[fname] += cnt
+        codegraph_sessions[fname].add(rpath)
+        codegraph_reads[fname] += cnt
 
-recurring_auggie = [
-    (f, len(auggie_sessions[f]), auggie_reads[f])
-    for f in auggie_sessions
-    if len(auggie_sessions[f]) >= 2
+recurring_codegraph = [
+    (f, len(codegraph_sessions[f]), codegraph_reads[f])
+    for f in codegraph_sessions
+    if len(codegraph_sessions[f]) >= 2
 ]
-recurring_auggie.sort(key=lambda x: (-x[1], -x[2]))
+recurring_codegraph.sort(key=lambda x: (-x[1], -x[2]))
 
-single_auggie = [
-    (f, 1, auggie_reads[f])
-    for f in auggie_sessions
-    if len(auggie_sessions[f]) == 1
+single_codegraph = [
+    (f, 1, codegraph_reads[f])
+    for f in codegraph_sessions
+    if len(codegraph_sessions[f]) == 1
 ]
-single_auggie.sort(key=lambda x: -x[2])
+single_codegraph.sort(key=lambda x: -x[2])
 
 # ── aggregate bash patterns ────────────────────────────────────────────────
 bash_sessions = defaultdict(set)
@@ -282,7 +282,7 @@ for kinds in session_kinds.values():
 
 KIND_LABELS = {
     'skill':   'Skill candidates',
-    'auggie':  'Source files (use Auggie)',
+    'codegraph':  'Source files (use CodeGraph)',
     'prompt':  'Prompt patterns',
     'tool':    'Better tool choices',
     'model':   'Model choice',
@@ -335,23 +335,23 @@ else:
     lines.append("_No repeated reference file reads detected across sessions._")
     lines.append("")
 
-# Auggie candidates (source code files)
+# CodeGraph candidates (source code files)
 lines.append("## Better search tool for source files")
 lines.append("")
-if recurring_auggie:
-    lines.append("Source files read repeatedly across 2+ sessions — use `mcp__auggie__codebase-retrieval` for lookups instead of re-reading:")
+if recurring_codegraph:
+    lines.append("Source files read repeatedly across 2+ sessions — use `mcp__codegraph__codegraph_explore` for lookups instead of re-reading:")
     lines.append("")
     lines.append("| File | Sessions | Total reads |")
     lines.append("|---|---:|---:|")
-    for fname, nsess, nreads in recurring_auggie:
+    for fname, nsess, nreads in recurring_codegraph:
         lines.append(f"| `{fname}` | {nsess} | {nreads} |")
     lines.append("")
-    lines.append("**Action:** Use `mcp__auggie__codebase-retrieval` with a natural-language query instead of re-reading these files; one call replaces a chain of Read/Grep calls.")
+    lines.append("**Action:** Use `mcp__codegraph__codegraph_explore` with a natural-language query instead of re-reading these files; one call replaces a chain of Read/Grep calls.")
     lines.append("")
-elif single_auggie:
+elif single_codegraph:
     lines.append("_No source files read across 2+ sessions. Single-session candidates:_")
     lines.append("")
-    for fname, nsess, nreads in single_auggie[:5]:
+    for fname, nsess, nreads in single_codegraph[:5]:
         lines.append(f"- `{fname}` — read {nreads}× in 1 session")
     lines.append("")
 else:
@@ -444,7 +444,7 @@ if do_write:
         f"{now_str}  {slug}  "
         f"${total_cost:.2f}  {n_sessions}sess  "
         f"{len(recurring_skills)} recurring skill(s)  "
-        f"{len(recurring_auggie)} auggie candidate(s)  "
+        f"{len(recurring_codegraph)} codegraph candidate(s)  "
         f"-> {audit_path}\n"
     )
     with open(audit_log, 'a') as f:
