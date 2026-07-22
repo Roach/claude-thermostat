@@ -83,6 +83,8 @@ current = []
 model_per_turn = []
 current_model = None
 tool_calls = []   # (tool_name, key_str, input_dict, turn_idx)
+tool_call_ids = []        # tool_use id per tool_calls entry, same index order
+tool_result_chars = {}    # tool_use_id -> content char count (from the matching tool_result)
 seen_msg_ids = set()  # dedupe re-appended assistant rows for tool-call counts
 user_prompts = []
 thinking_blocks = 0   # count of extended-thinking content blocks (bill as output)
@@ -130,8 +132,25 @@ with open(path, encoding='utf-8', errors='replace') as f:
                 last_ts = ts
             _uc = obj.get('message', {}).get('content')
             if isinstance(_uc, list):
-                tool_errors += sum(1 for x in _uc if isinstance(x, dict)
-                                   and x.get('type') == 'tool_result' and x.get('is_error'))
+                for x in _uc:
+                    if not (isinstance(x, dict) and x.get('type') == 'tool_result'):
+                        continue
+                    if x.get('is_error'):
+                        tool_errors += 1
+                    # Content size of the tool_result = what actually got billed as
+                    # input on the next API call (before caching kicks in on later
+                    # turns) — the closest per-call proxy the transcript exposes.
+                    cont = x.get('content')
+                    if isinstance(cont, str):
+                        size = len(cont)
+                    elif isinstance(cont, list):
+                        size = sum(len(b.get('text', '')) for b in cont
+                                   if isinstance(b, dict) and b.get('type') == 'text')
+                    else:
+                        size = 0
+                    tuid = x.get('tool_use_id')
+                    if tuid:
+                        tool_result_chars[tuid] = tool_result_chars.get(tuid, 0) + size
             if is_real_user(obj):
                 txt = user_text(obj)
                 if txt: user_prompts.append(txt)
@@ -189,6 +208,7 @@ with open(path, encoding='utf-8', errors='replace') as f:
                         else:
                             key = ''
                         tool_calls.append((name, key, inp, len(turns)))
+                        tool_call_ids.append(c.get('id'))
         elif t == 'system':
             if obj.get('subtype') == 'compact_boundary' and in_session(obj, start_unix):
                 compacts += 1
@@ -196,6 +216,18 @@ with open(path, encoding='utf-8', errors='replace') as f:
 if current:
     turns.append(current)
     model_per_turn.append(current_model or 'unknown')
+
+# Approx tokens each tool call's result contributed (chars / 4), parallel to
+# tool_calls. This is the tool_result content billed as input on the *next*
+# API call, before caching — the closest per-call cost proxy the transcript
+# exposes (turn-level usage can't isolate one tool's share of a turn's input).
+tool_call_tokens = [tool_result_chars.get(tuid, 0) // 4 for tuid in tool_call_ids]
+tool_tokens_by_name = Counter()
+tool_tokens_by_key = defaultdict(int)
+for (name, key, _, _), tok in zip(tool_calls, tool_call_tokens):
+    tool_tokens_by_name[name] += tok
+    if key:
+        tool_tokens_by_key[(name, key)] += tok
 
 # --- cost ---
 # Bill each unique Anthropic message.id once, per turn, per the turn's model.
@@ -254,16 +286,18 @@ edited_files = {k for n, k, _, _ in tool_calls
 for f, n in read_counts.most_common(8):
     if n < 3 or f in edited_files:
         continue
+    tok = tool_tokens_by_key.get(('Read', f), 0)
+    tok_note = f" (~{tok:,} tokens)" if tok else ""
     ext = _ext(f)
     if ext in SOURCE_EXTS:
         suggestions.append((
             'auggie',
-            f"Read `{f}` {n}× — use `mcp__auggie__codebase-retrieval` for lookups into this file instead of re-reading it"
+            f"Read `{f}` {n}×{tok_note} — use `mcp__auggie__codebase-retrieval` for lookups into this file instead of re-reading it"
         ))
     else:
         suggestions.append((
             'skill',
-            f"Read `{f}` {n}× — convert to a skill at `~/.claude/skills/` so it loads on-demand instead of re-reading"
+            f"Read `{f}` {n}×{tok_note} — convert to a skill at `~/.claude/skills/` so it loads on-demand instead of re-reading"
         ))
 
 wf_counts = Counter(k for n, k, _, _ in tool_calls if n == 'WebFetch' and k)
@@ -289,7 +323,7 @@ total_tools = len(tool_calls) or 1
 if grep_read >= 30 and grep_read / total_tools > 0.4:
     suggestions.append((
         'tool',
-        f"{grep_read} Grep/Read/Glob calls ({100*grep_read//total_tools}% of all tool use) — heavy codebase exploration. Try `mcp__auggie__codebase-retrieval` for natural-language lookups; one call replaces a chain"
+        f"{grep_read} Grep/Read/Glob calls ({100*grep_read//total_tools}% of all tool use, ~{sum(tool_tokens_by_name.get(t, 0) for t in ('Grep', 'Read', 'Glob')):,} tokens) — heavy codebase exploration. Try `mcp__auggie__codebase-retrieval` for natural-language lookups; one call replaces a chain"
     ))
 
 # 3) Bash repetition
@@ -835,10 +869,16 @@ lines.append("")
 if tool_calls:
     lines.append("## Tool histogram")
     lines.append("")
-    lines.append("| Tool | Calls |")
-    lines.append("|---|---:|")
+    lines.append("| Tool | Calls | ≈Tokens |")
+    lines.append("|---|---:|---:|")
     for name, n in Counter(n for n, _, _, _ in tool_calls).most_common():
-        lines.append(f"| {name} | {n} |")
+        tok = tool_tokens_by_name.get(name, 0)
+        lines.append(f"| {name} | {n} | {tok:,} |" if tok else f"| {name} | {n} | — |")
+    lines.append("")
+    lines.append(
+        "_≈Tokens is the tool_result content size (chars ÷ 4) billed as input on "
+        "the next API call, before caching — an approximation, not an exact billed figure._"
+    )
     lines.append("")
 
 with open(report_file, 'w') as f:
