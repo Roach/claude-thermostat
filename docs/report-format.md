@@ -129,14 +129,19 @@ _No notable inefficiencies detected — this session looked efficient._
 ```markdown
 ## Tool histogram
 
-| Tool | Calls |
-|---|---:|
-| Bash | 42 |
-| Read | 31 |
+| Tool | Calls | ≈Tokens |
+|---|---:|---:|
+| Bash | 42 | — |
+| Read | 31 | 18,204 |
 ...
 ```
 
-The histogram is **informational** — tool names and counts may vary.
+The histogram is **informational** — tool names, counts, and the `≈Tokens`
+column may vary or be absent. `≈Tokens` is derived from each tool call's
+matching `tool_result` content size (chars ÷ 4), which approximates what that
+result billed as input on the *next* API call before caching applied — it is
+not an exact billed figure, and a tool with no attributable result content
+(e.g. one whose result never resolved before the transcript ended) shows `—`.
 
 ### Subscription-window caveats block
 
