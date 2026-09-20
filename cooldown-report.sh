@@ -58,15 +58,15 @@ REPORT_FILE="${CLAUDE_COOLDOWN_FILE:-$REPORT_DIR/${session_id}.md}"
 mkdir -p "$(dirname "$REPORT_FILE")"
 
 /usr/bin/python3 - "$transcript_path" "$session_id" "$reason" "$REPORT_FILE" "$LOG" "$session_start" "$state_file" "$TUNING_FILE" <<'PY'
-import json, os, sys, re, time
+import json, os, sys, re
 from collections import Counter, defaultdict
 from datetime import datetime
 
 sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
 from _lib import (
     is_real_user, in_session, turn_cost_usd, dedupe_turn, lookup_pricing,
+    sonnet_savings,
     update_window_index, tokens_in_window, format_token_count,
-    _SONNET_5_INTRO_END,
 )
 
 path, session_id, reason, report_file, log_file = sys.argv[1:6]
@@ -229,8 +229,8 @@ suggestions = []
 # 1) Skill candidates: same file Read 3+ times, same WebFetch URL 2+ times,
 #    same Grep pattern 3+ times — these are reference material that should
 #    live in a skill (loaded once, on-demand).
-#    Source code files (.py, .ts, .js, etc.) go to an "auggie" bucket instead —
-#    they should be queried via mcp__auggie__codebase-retrieval, not bundled
+#    Source code files (.py, .ts, .js, etc.) go to a "search" bucket instead —
+#    they should be queried with semantic code search, not bundled
 #    into a skill.
 SKILL_EXTS = {
     '.md', '.html', '.htm', '.yaml', '.yml', '.json', '.toml', '.txt',
@@ -257,8 +257,8 @@ for f, n in read_counts.most_common(8):
     ext = _ext(f)
     if ext in SOURCE_EXTS:
         suggestions.append((
-            'auggie',
-            f"Read `{f}` {n}× — use `mcp__auggie__codebase-retrieval` for lookups into this file instead of re-reading it"
+            'search',
+            f"Read `{f}` {n}× — use semantic code search (e.g. CodeGraph's `codegraph_explore`, or `codegraph explore` in-shell) for lookups into this file instead of re-reading it"
         ))
     else:
         suggestions.append((
@@ -280,16 +280,16 @@ for g, n in grep_counts.most_common(3):
         pat = g.split('|', 1)[0]
         suggestions.append((
             'skill',
-            f"Grep `{pat}` {n}× — same exploration repeated; consider a skill with the answer pre-written, or mcp__auggie__codebase-retrieval"
+            f"Grep `{pat}` {n}× — same exploration repeated; consider a skill with the answer pre-written, or semantic code search"
         ))
 
-# 2) Auggie / grep-chain
+# 2) Grep-chain
 grep_read = sum(1 for n, _, _, _ in tool_calls if n in ('Grep', 'Read', 'Glob'))
 total_tools = len(tool_calls) or 1
 if grep_read >= 30 and grep_read / total_tools > 0.4:
     suggestions.append((
         'tool',
-        f"{grep_read} Grep/Read/Glob calls ({100*grep_read//total_tools}% of all tool use) — heavy codebase exploration. Try `mcp__auggie__codebase-retrieval` for natural-language lookups; one call replaces a chain"
+        f"{grep_read} Grep/Read/Glob calls ({100*grep_read//total_tools}% of all tool use) — heavy codebase exploration. Try semantic code search (e.g. CodeGraph's `codegraph_explore`) for natural-language lookups; one call replaces a chain"
     ))
 
 # 3) Bash repetition
@@ -316,13 +316,17 @@ if prem_turns and per_model_usd:
             out = sum(u.get('output_tokens', 0) for _, u in t)
             if out < 500: cheap_count += 1
         if cheap_count >= 3:
+            # None for an unpriced model: the ratio would come from the
+            # fallback tuple, i.e. invented. Fall back to naming the models.
+            son_x = sonnet_savings(prem_turns[0][1])
             prem_out = lookup_pricing(prem_turns[0][1])[3]
-            son_x = prem_out / lookup_pricing('claude-sonnet-5')[3]
             hai_x = prem_out / lookup_pricing('claude-haiku-4-5')[3]
             label = 'Opus' if prem_turns[0][1].startswith('claude-opus') else 'Fable'
+            _cheaper = (f"Sonnet (~{son_x:.1f}× cheaper) or Haiku (~{hai_x:.0f}× cheaper)"
+                        if son_x else "Sonnet or Haiku")
             suggestions.append((
                 'model',
-                f"{cheap_count} {label} turn(s) produced <500 output tokens — these were small lookups/edits that Sonnet (~{son_x:.1f}× cheaper) or Haiku (~{hai_x:.0f}× cheaper) would have handled. Use `/model sonnet` for routine work; reserve {label} for hard reasoning"
+                f"{cheap_count} {label} turn(s) produced <500 output tokens — these were small lookups/edits that {_cheaper} would have handled. Use `/model sonnet` for routine work; reserve {label} for hard reasoning"
             ))
 
 # 5) Cache hit rate — low cache_read ratio means context churn (rules
@@ -486,8 +490,9 @@ if len(high_output_inline) >= 2:
         'tool',
         f"{len(high_output_inline)} turns with ≥{OUTPUT_INLINE_THRESH} output tokens and no Bash/Write "
         f"({_total_inline_out//1000}K tokens total) — model may have computed or reformatted data "
-        f"inline instead of scripting it. Install the deterministic-toolkit skill shipped "
-        f"with claude-thermostat (`skills/deterministic-toolkit.md`) for mechanical work: parsing, converting formats, deduping, "
+        f"inline instead of scripting it. Use a deterministic-toolkit skill for mechanical "
+        f"work — available as the `deterministic-toolkit` plugin skill, or the copy "
+        f"bundled here (`skills/deterministic-toolkit.md`): parsing, converting formats, deduping, "
         f"aggregating, validating, diffing. Scripts are deterministic; in-context arithmetic "
         f"and reformatting are not."
     ))
@@ -508,23 +513,35 @@ if first_overhead and first_overhead >= 30_000:
 #     follows a longer idle gap re-writes the context at 1.25x input instead
 #     of reading it at 0.1x. Detected: >5.5min gap AND a large cache_write on
 #     the following call.
+# The gap that counts as an expiry depends on which TTL the write used, so
+# read it off the write itself rather than assuming 5m: Claude Code main
+# sessions write at the 1h tier, subagents at 5m. Assuming 5m everywhere
+# reported ~40% false expiries on a 1h session, and priced the re-write at
+# the wrong rate on top.
 expiries = 0
 expiry_wasted_usd = 0.0
+_ttl_seen = set()
 _prev_ts = None
 for _tsu, _mdl, _u in usage_seq:
     _cw = _u.get('cache_creation_input_tokens', 0) or 0
-    if _prev_ts and _tsu and _tsu - _prev_ts > 330 and _cw > 20_000:
+    _cw1 = (_u.get('cache_creation') or {}).get('ephemeral_1h_input_tokens', 0) or 0
+    _is_1h = _cw1 > _cw / 2 if _cw else False
+    _gap = 3660 if _is_1h else 330
+    if _prev_ts and _tsu and _tsu - _prev_ts > _gap and _cw > 20_000:
         _p = lookup_pricing(_mdl)
+        _wr = _p[4] if _is_1h else _p[1]
         expiries += 1
-        expiry_wasted_usd += _cw * (_p[1] - _p[2]) / 1_000_000
+        _ttl_seen.add('1h' if _is_1h else '5min')
+        expiry_wasted_usd += _cw * (_wr - _p[2]) / 1_000_000
     if _tsu:
         _prev_ts = _tsu
 if expiries >= 2:
+    _ttl_label = '/'.join(sorted(_ttl_seen)) or '5min'
     suggestions.append((
         'cache',
-        f"{expiries} cache expiration(s): turns that followed a >5min idle gap re-wrote the full "
-        f"context (~${expiry_wasted_usd:.2f} extra vs a warm cache — the 5-minute cache TTL had "
-        f"lapsed). Batch prompts while the cache is warm, or close the session when stepping away"
+        f"{expiries} cache expiration(s): turns that followed an idle gap longer than the cache "
+        f"TTL ({_ttl_label}) re-wrote the full context (~${expiry_wasted_usd:.2f} extra vs a warm "
+        f"cache). Batch prompts while the cache is warm, or close the session when stepping away"
     ))
 
 # 16) Failed tool calls — each errored tool_result costs a full round-trip and
@@ -554,18 +571,6 @@ if compacts and compact_read_pos is not None:
             f"{len(re_read)} file(s) re-read after compaction ({_sample}) — compaction dropped "
             f"content you paid to read, then you paid to read it again. Steer it with "
             f"`/compact <what to keep>`, or checkpoint (commit + push) and start fresh before it triggers"
-        ))
-
-# 18) Sonnet 5 introductory pricing ends 2026-09-01 — flag when the flip is
-#     close so the cost jump doesn't read as a regression.
-if any('sonnet-5' in m for m in per_model_usd):
-    _days_left = int((_SONNET_5_INTRO_END - time.time()) // 86400)
-    if 0 <= _days_left <= 45:
-        suggestions.append((
-            'pricing',
-            f"Heads-up: Sonnet 5 introductory pricing ($2/$10 per MTok) ends 2026-09-01 "
-            f"({_days_left} days) — costs will rise ~50% at standard rates ($3/$15). "
-            f"Not a regression when it happens"
         ))
 
 # 19) Multi-day / stale session — a transcript left open half a day or more
@@ -664,12 +669,22 @@ def _tuning_suggestions(sessions, cost_thresh_cents):
         above_100 = sum(1 for k in nag_ctxs if k >= 100)
         if above_100 / len(nag_ctxs) >= 0.6:
             median_ctx = sorted(nag_ctxs)[len(nag_ctxs) // 2]
-            suggs.append(
-                f"Context is above 100K tokens at alert time in "
-                f"{above_100}/{len(nag_ctxs)} recent nags (median {median_ctx}K). "
-                f"Enable `CLAUDE_THERMOSTAT_CONTEXT_K=90` to catch it earlier, "
-                f"when `/compact` recovers more context."
-            )
+            # Recommend a value that sits below the bulk of observed alert
+            # A threshold that every session crosses is a constant, not a
+            # signal. Aim just under the bulk of observed alert contexts so it
+            # still discriminates, and stay quiet when the live value is
+            # already close — a hardcoded number would recommend itself forever.
+            ck_rec = max(60, int(median_ctx * 0.8) // 10 * 10)
+            ck_live = int(os.environ.get('CLAUDE_THERMOSTAT_CONTEXT_K') or 0)
+            if not (ck_live and abs(ck_live - ck_rec) <= ck_rec * 0.2):
+                _dir = ("fires on nearly every session — raise it"
+                        if ck_live and ck_live < ck_rec else
+                        "would catch this earlier")
+                suggs.append(
+                    f"Context is above 100K tokens at alert time in "
+                    f"{above_100}/{len(nag_ctxs)} recent nags (median {median_ctx}K). "
+                    f"`CLAUDE_THERMOSTAT_CONTEXT_K={ck_rec}` {_dir}."
+                )
 
     # 3. Persistent antipatterns: antipatterns dominate triggers across sessions.
     all_triggers = [t for s in recent for n in (s.get('nag_history') or []) for t in n.get('triggers', [])]
@@ -678,9 +693,9 @@ def _tuning_suggestions(sessions, cost_thresh_cents):
         if ap_share >= 0.6:
             suggs.append(
                 f"Antipatterns trigger {int(ap_share*100)}% of your alerts across recent "
-                f"sessions — the patterns aren't improving. Consider installing the "
-                f"Auggie MCP (`mcp__auggie__codebase-retrieval`) as your primary "
-                f"codebase search: one call replaces most Grep/Read chains."
+                f"sessions — the patterns aren't improving. Consider a semantic "
+                f"code-search tool (e.g. CodeGraph's `codegraph_explore`) as your "
+                f"primary codebase search: one call replaces most Grep/Read chains."
             )
 
     # 4. Alert fatigue: 3+ nags per nagged session on average.
@@ -689,8 +704,9 @@ def _tuning_suggestions(sessions, cost_thresh_cents):
         if avg_nags >= 3:
             suggs.append(
                 f"You average {avg_nags:.1f} alerts per session. If the alerts feel "
-                f"noisy, raise `CLAUDE_THERMOSTAT_COOLDOWN_TURNS` (currently the "
-                f"default 10) to widen the deadband, or increase the cost setpoint."
+                f"noisy, raise `CLAUDE_THERMOSTAT_COOLDOWN_TURNS` (currently "
+                f"{int(os.environ.get('CLAUDE_THERMOSTAT_COOLDOWN_TURNS') or 10)}) "
+                f"to widen the deadband, or increase the cost setpoint."
             )
 
     return suggs
@@ -770,15 +786,14 @@ if suggestions:
         by_kind[kind].append(s)
     titles = {
         'skill':  'New skills to consider',
-        'auggie': 'Better search tool for source files',
+        'search': 'Better search tool for source files',
         'tool':   'Better tool choices',
         'model':  'Model choice',
         'prompt': 'Prompt patterns',
         'context':'Context hygiene',
         'cache':  'Cache economics',
-        'pricing':'Pricing changes',
     }
-    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'cache', 'prompt', 'pricing'):
+    for kind in ('model', 'skill', 'search', 'tool', 'context', 'cache', 'prompt'):
         if kind not in by_kind: continue
         lines.append(f"### {titles[kind]}")
         for s in by_kind[kind]:
@@ -874,17 +889,16 @@ if suggestions:
     titles = {
         'model':  'Model choice',
         'skill':  'New skills to consider',
-        'auggie': 'Better search tool for source files',
+        'search': 'Better search tool for source files',
         'tool':   'Better tool choices',
         'context':'Context hygiene',
         'cache':  'Cache economics',
         'prompt': 'Prompt patterns',
-        'pricing':'Pricing changes',
     }
     by_kind = defaultdict(list)
     for kind, s in suggestions:
         by_kind[kind].append(s)
-    for kind in ('model', 'skill', 'auggie', 'tool', 'context', 'cache', 'prompt', 'pricing'):
+    for kind in ('model', 'skill', 'search', 'tool', 'context', 'cache', 'prompt'):
         if kind not in by_kind: continue
         print(f"\n  {_c(BOLD, titles[kind])}:", file=sys.stderr)
         for s in by_kind[kind]:

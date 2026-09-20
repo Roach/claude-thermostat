@@ -1392,7 +1392,7 @@
       <ul>
         <li><b>Model choice</b> — 4 Fable turns produced &lt;500 output tokens. These were small lookups; Sonnet (~3.3× cheaper) or Haiku (~10× cheaper) would have handled them. Use <code>/model sonnet</code> for routine work.</li>
         <li><b>Skill candidate</b> — Read <code>docs/pricing-spec.md</code> 5× — convert to a skill at <code>~/.claude/skills/</code> so it loads on demand rather than re-reading every turn.</li>
-        <li><b>Tool choice</b> — 38 Grep/Read/Glob calls (61% of all tool use). Try <code>mcp__auggie__codebase-retrieval</code> for natural-language lookups; one call usually replaces a chain.</li>
+        <li><b>Tool choice</b> — 38 Grep/Read/Glob calls (61% of all tool use). Try <code>codegraph_explore</code> for natural-language lookups; one call usually replaces a chain.</li>
         <li><b>Prompt pattern</b> — 12/19 prompts were &lt;60 chars. Many turn-based corrections — one detailed first prompt often beats many small follow-ups and reuses cache better.</li>
         <li><b>Long, hot session</b> — 24 turns, final context 168K — near auto-compaction. Commit + push to checkpoint, then start fresh: git history carries context forward more cheaply than a compacted transcript. Or steer it with <code>/compact &lt;what to keep&gt;</code>.</li>
         <li><b>Extended thinking</b> — 31 thinking blocks and 74K output tokens. Thinking bills as output; for routine work, lower reasoning effort with <code>/effort</code> or <code>MAX_THINKING_TOKENS</code>.</li>

@@ -125,7 +125,7 @@ analyze() {
 import json, os, re, sys, time
 from collections import Counter
 sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
-from _lib import is_real_user, in_session, lookup_pricing
+from _lib import is_real_user, in_session, lookup_pricing, sonnet_savings
 
 SLEEP_RE = re.compile(r'(?<![A-Za-z_])sleep\s+(\d+)')
 WINDOW = 30      # rolling tool-call / message window for antipattern detection
@@ -143,9 +143,9 @@ def tool_key(name, inp):
 
 def emit(session_id='', active=1, ss=0, tc=0, lnt=0, nc=0, cost=0, ctx=0,
          model='unknown', turns=0, hit=0, lt_hit=0, disp='$0.00',
-         ac='default', show_ac=1, reasons=()):
+         ac='default', show_ac=1, sonnet_x='', reasons=()):
     for v in (session_id, active, ss, tc, lnt, nc, cost, ctx, model,
-              turns, hit, lt_hit, disp, ac, show_ac):
+              turns, hit, lt_hit, disp, ac, show_ac, sonnet_x):
         print(v)
     for r in reasons:
         print(r)
@@ -367,13 +367,13 @@ for sa, cnt in Counter(agent_keys).most_common(2):
 
 # 5) Exploratory grep-chain: lots of distinct Grep + Read calls in the
 #    recent window suggests "feeling around" the codebase, which burns
-#    input tokens fast. A single Auggie codebase-retrieval call is usually
+#    input tokens fast. A single semantic code-search call is usually
 #    cheaper and more accurate.
 explor = [n for n, k, s in recent if n in ('Grep', 'Read', 'Glob')]
 if len(explor) >= 6:
     reasons.append(
         f"{len(explor)} Grep/Read/Glob calls in last {WINDOW} tool calls — "
-        f"try mcp__auggie__codebase-retrieval for natural-language lookups"
+        f"try semantic code search (e.g. codegraph_explore) for natural-language lookups"
     )
 
 # 6) Same WebFetch URL hit repeatedly — almost always a "didn't read the
@@ -437,8 +437,12 @@ try:
 except Exception:
     pass
 
+# None when the model is unpriced or no cheaper than Sonnet — the nag then
+# omits the downgrade option rather than showing an invented ratio.
+_sx = sonnet_savings(primary)
 emit(session_id, 0, ss, tc, lnt, nc, cost_cents, context_k, primary,
-     tx_turns, hit, lt_hit, f'${cost_cents / 100:.2f}', ac, show_ac, reasons)
+     tx_turns, hit, lt_hit, f'${cost_cents / 100:.2f}', ac, show_ac,
+     f'{_sx:.1f}' if _sx else '', reasons)
 PY
 }
 
@@ -461,6 +465,7 @@ analysis_out="$(analyze)"
   read -r cost_display
   read -r ac_thresh
   read -r show_ac
+  read -r sonnet_x
   ap_reasons="$(cat)"
 } <<< "$analysis_out"
 
@@ -653,14 +658,11 @@ if [ "${context_k:-0}" -ge 50 ]; then
     options+='"Delegate to a subagent — keep Read/Bash/Grep out of main context; cheaper turns"'$'\n'
   fi
 fi
-case "$model" in
-  claude-opus-*)
-    options+='"/model sonnet — ~1.7× cheaper; switch for routine turns"'$'\n'
-    ;;
-  claude-fable-*|claude-mythos-*)
-    options+='"/model sonnet — ~3.3× cheaper; switch for routine turns"'$'\n'
-    ;;
-esac
+# sonnet_x comes from the pricing table via analyze(); empty when the model
+# is unpriced or already cheap, so the ratio can never drift or be invented.
+if [ -n "$sonnet_x" ]; then
+  options+='"/model sonnet — ~'"$sonnet_x"'× cheaper; switch for routine turns"'$'\n'
+fi
 # Auto-compact threshold: offer when context is substantial and the current
 # threshold leaves room to lower it (at default ~0.90, or explicitly above
 # 0.75). ac_thresh/show_ac come from the analysis pass.

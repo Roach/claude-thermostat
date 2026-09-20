@@ -1,61 +1,104 @@
 import glob
 import json
 import os
+import sys
 import time
 from datetime import datetime
 
-# (input, cache_write_5m, cache_read, output) per million tokens.
+# (input, cache_write_5m, cache_read, output, cache_write_1h) per million
+# tokens. The 1h rate is 2x input; the 5m rate is 1.25x.
+#
+# Source: https://platform.claude.com/docs/en/about-claude/pricing
+# Verified 2026-09-20 against the published table. Cache read is 0.1x input
+# on every family EXCEPT Fable 5.1 / Mythos 5.1, which are 0.025x — their
+# own rows exist so they don't suffix-strip onto the 5 rows and get billed 4x.
+#
+# Claude Code main sessions write the cache at the 1h tier; subagent
+# transcripts use 5m. Both are billed from their own slot.
 # Keys are the unversioned model family; lookup_pricing strips date suffixes
 # like "-20251001" before matching, so dated IDs in transcripts still resolve.
 # Verify against https://www.anthropic.com/pricing whenever a new model ships.
 PRICING = {
-    'claude-fable-5':     (10.00, 12.50, 1.00, 50.00),
-    'claude-mythos-5':    (10.00, 12.50, 1.00, 50.00),
-    'claude-opus-4-8':    ( 5.00,  6.25, 0.50, 25.00),
-    'claude-opus-4-7':    ( 5.00,  6.25, 0.50, 25.00),
-    'claude-opus-4-6':    ( 5.00,  6.25, 0.50, 25.00),
-    'claude-sonnet-5':    ( 3.00,  3.75, 0.30, 15.00),
-    'claude-sonnet-4-6':  ( 3.00,  3.75, 0.30, 15.00),
-    'claude-haiku-4-5':   ( 1.00,  1.25, 0.10,  5.00),
+    'claude-fable-5-1':   (10.00, 12.50, 0.25, 50.00, 20.00),
+    'claude-mythos-5-1':  (10.00, 12.50, 0.25, 50.00, 20.00),
+    'claude-fable-5':     (10.00, 12.50, 1.00, 50.00, 20.00),
+    'claude-mythos-5':    (10.00, 12.50, 1.00, 50.00, 20.00),
+    'claude-opus-5':      ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-opus-4-8':    ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-opus-4-7':    ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-opus-4-6':    ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-opus-4-5':    ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-sonnet-5':    ( 2.00,  2.50, 0.20, 10.00,  4.00),
+    'claude-sonnet-4-6':  ( 3.00,  3.75, 0.30, 15.00,  6.00),
+    'claude-sonnet-4-5':  ( 3.00,  3.75, 0.30, 15.00,  6.00),
+    'claude-haiku-4-5':   ( 1.00,  1.25, 0.10,  5.00,  2.00),
 }
-DEFAULT_PRICING = (3.00, 3.75, 0.30, 15.00)  # Sonnet as fallback
+DEFAULT_PRICING = (3.00, 3.75, 0.30, 15.00, 6.00)  # Sonnet 4.6 rates; see _warn_unpriced
 
-# Sonnet 5 launched with introductory pricing ($2/$10) through 2026-08-31;
-# standard $3/$15 applies from 2026-09-01. Sessions are billed at whichever
-# rate is live now — close enough since reports run at session end.
-_SONNET_5_INTRO = (2.00, 2.50, 0.20, 10.00)
-_SONNET_5_INTRO_END = datetime(2026, 9, 1).timestamp()
+_warned_models = set()
 
 
-def lookup_pricing(model_id):
-    """Return the pricing tuple for a transcript `model` string.
+def _warn_unpriced(model_id):
+    """Warn once per model id that we are guessing its price."""
+    if model_id in _warned_models:
+        return
+    _warned_models.add(model_id)
+    sys.stderr.write(
+        f'thermostat: no pricing entry for {model_id!r}; using fallback rates '
+        f'— costs for this model are wrong. Add it to PRICING in _lib.py.\n')
 
-    Transcripts sometimes carry dated IDs (e.g. `claude-haiku-4-5-20251001`)
-    or a Claude Code context-tier suffix (e.g. `claude-fable-5[1m]`) that
-    don't match the canonical PRICING keys. We strip any `[...]` suffix, try
-    exact match, then progressively strip trailing `-xxx` segments until we
-    find a hit. The `[1m]` tier carries no pricing premium on any current
-    model, so dropping it is billing-neutral. Falls back to Sonnet pricing
-    when nothing matches.
+def _resolve_key(model_id):
+    """Return the PRICING key `model_id` maps to, or None if it is unpriced.
+
+    Transcripts carry dated ids (`claude-haiku-4-5-20251001`) and a Claude Code
+    context-tier suffix (`claude-fable-5[1m]`). Strip the suffix, try an exact
+    match, then drop trailing `-xxx` segments until one hits. The `[1m]` tier
+    carries no pricing premium on any current model, so dropping it is
+    billing-neutral.
     """
     if not model_id:
-        return DEFAULT_PRICING
+        return None
     model_id = model_id.split('[')[0]
-
-    def _resolve(key):
-        if key == 'claude-sonnet-5' and time.time() < _SONNET_5_INTRO_END:
-            return _SONNET_5_INTRO
-        return PRICING[key]
-
     if model_id in PRICING:
-        return _resolve(model_id)
+        return model_id
     parts = model_id.split('-')
     while len(parts) > 1:
         parts.pop()
         candidate = '-'.join(parts)
         if candidate in PRICING:
-            return _resolve(candidate)
-    return DEFAULT_PRICING
+            return candidate
+    return None
+
+
+def lookup_pricing(model_id):
+    """Return the pricing tuple for a transcript `model` string.
+
+    An unpriced model falls back to DEFAULT_PRICING and warns on stderr; a
+    silent fallback misprices every session on that model.
+    """
+    key = _resolve_key(model_id)
+    if key is None:
+        _warn_unpriced(model_id)
+        return DEFAULT_PRICING
+    return PRICING[key]
+
+
+def sonnet_savings(model_id):
+    """How many times cheaper Sonnet 5's output is than `model_id`'s, or None.
+
+    None means there is no honest number to show — either the model is
+    unpriced (the ratio would be derived from DEFAULT_PRICING, i.e. invented)
+    or it is not more expensive than Sonnet. Callers omit the suggestion
+    rather than print a fabricated figure. Output price alone is
+    representative: input, cache and output ratios are uniform per family.
+    """
+    key = _resolve_key(model_id)
+    if key is None:
+        return None
+    cur, son = PRICING[key][3], PRICING['claude-sonnet-5'][3]
+    if not son or cur <= son:
+        return None
+    return cur / son
 
 
 def dedupe_turn(turn):
@@ -108,10 +151,17 @@ def turn_cost_usd(turn, model_id, mode='api'):
     cw  = sum(u.get('cache_creation_input_tokens', 0) for u in usages)
     cr  = sum(u.get('cache_read_input_tokens', 0) for u in usages)
     out = sum(u.get('output_tokens', 0) for u in usages)
+    # Cache writes bill 1.25x input at the 5m tier and 2x at 1h. Transcripts
+    # since ~Aug 2026 break the split out in `cache_creation`; without it we
+    # can only assume 5m. Main sessions run 1h, so pricing the whole lot at
+    # the 5m rate understated every cache write by 60%.
+    cw1 = sum((u.get('cache_creation') or {}).get('ephemeral_1h_input_tokens', 0)
+              for u in usages)
+    cw5 = cw - cw1
     # 'subscription' and its legacy alias 'claude-code' both drop cache_read;
     # only 'api' bills it at the 0.1x input rate.
     cr_cost = cr * p[2] if mode == 'api' else 0
-    cost = (inp * p[0] + cw * p[1] + cr_cost + out * p[3]) / 1_000_000
+    cost = (inp * p[0] + cw5 * p[1] + cw1 * p[4] + cr_cost + out * p[3]) / 1_000_000
     return cost, inp, cw, cr, out
 
 

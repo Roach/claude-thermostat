@@ -76,12 +76,32 @@ Instead of (or in addition to) env vars, drop a shell-style config at `~/.claude
 
 ```sh
 # ~/.claude/thermostat/config.env
-CLAUDE_THERMOSTAT_COST_CENTS=3000     # fire at $30 instead of $50
+CLAUDE_THERMOSTAT_COST_CENTS=1500     # fire at $15 instead of $50
 CLAUDE_THERMOSTAT_COOLDOWN_TURNS=15
-CLAUDE_THERMOSTAT_CONTEXT_K=120
+CLAUDE_THERMOSTAT_CONTEXT_K=160
 ```
 
 The config file is sourced before defaults, so its values override any env vars in the calling environment. To temporarily override, edit the file or set `CLAUDE_THERMOSTAT_CONFIG=/dev/null` to skip it entirely.
+
+## Checks
+
+`./check.sh` verifies shell and Python syntax and sanity-checks the pricing
+table: every current model must resolve to its own `PRICING` entry rather
+than silently falling back to `DEFAULT_PRICING`, tuples must be 5-wide, and
+each rate must match its published multiplier (5m write 1.25x input, 1h
+write 2x, cache read 0.1x — 0.025x on Fable/Mythos 5.1).
+
+This matters because the hook runs from your working tree: a syntax error
+breaks every turn until it's fixed, and a missing model entry misprices
+every session on that model without any visible error. Enable it as a
+pre-commit hook with:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+To also run it in CI, add a workflow that checks out the repo and runs
+`./check.sh` on `pull_request`.
 
 ## Wiring (`~/.claude/settings.json`)
 
@@ -103,7 +123,7 @@ The config file is sourced before defaults, so its values override any env vars 
 - **`/compact`** — summarizes history and shrinks the context window. Best when the task is ongoing and context is large. Shown when context is at or above `CLAUDE_THERMOSTAT_CONTEXT_K`.
 - **Delegate to a subagent** — shown whenever context reaches 50K+ tokens, regardless of what triggered the alert. Subagents run in their own context window, so their Read/Bash/Grep output never lands in the main thread — subsequent main-thread turns stay cheaper. For this to actually save tokens, _accept the subagent's summary_ instead of re-running the same reads in the main thread to "verify" it; if the summary is thin, re-delegate with a sharper prompt rather than falling back to direct exploration. (A companion `~/.claude/CLAUDE.md` rule enforces this no-fallback discipline.)
 - **Lower `autoCompactThreshold`** — shown when context reaches 50K+ tokens and the current threshold is above 0.75 (or unset, implying the ~0.90 default). Selecting it sets `autoCompactThreshold: 0.70` in `~/.claude/settings.json` so Claude Code compacts automatically before context bloat compounds across future sessions.
-- **`/model sonnet`** — shown when running a premium-tier model; Sonnet is ~1.7× cheaper than Opus and ~3.3× cheaper than Fable on both input and output.
+- **`/model sonnet`** — shown when running a premium-tier model; the ratio is derived from the pricing table in `_lib.py` (currently ~2.5× cheaper than Opus and ~5× cheaper than Fable/Mythos). Omitted when the model is unpriced, so the option never shows a guessed figure.
 - **`/clear`** — wipes context entirely. Best when pivoting to a new sub-task.
 - **Close and reopen** — fully new session, lowest cost baseline. Best when the current task is done.
 - **Continue** — dismiss and keep going. The hook re-arms after `COOLDOWN_TURNS` more turns.
@@ -117,7 +137,7 @@ The report includes:
 - Cost, duration, turn count, per-model breakdown, token totals
 - **Cache hit %** — higher is cheaper; <40% suggests context churn (big auto-loading rules, frequent /clear)
 - **Skill candidates** — files Read 3+ times, URLs WebFetched 2+ times, Grep patterns repeated 3+ times. These are reference material that should live in a skill.
-- **Tool choice** — if Grep/Read/Glob dominated, suggests `mcp__auggie__codebase-retrieval` for natural-language lookups; if context grew large with no subagent use, suggests delegating. (Auggie is one example — the detector fires on the grep-chain pattern, not the tool; any codebase-retrieval MCP or a pre-built code index like [codegraph](https://github.com/colbymchenry/codegraph) addresses it.)
+- **Tool choice** — if Grep/Read/Glob dominated, suggests a semantic code-search tool (e.g. CodeGraph's `codegraph_explore`) for natural-language lookups; if context grew large with no subagent use, suggests delegating. (The detector fires on the grep-chain pattern, not on any particular tool; any codebase-retrieval MCP or a pre-built code index such as [codegraph](https://github.com/colbymchenry/codegraph) addresses it.)
 - **Model choice** — if Opus dominated cost and produced many small outputs, flags downgrade candidates.
 - **Model switches mid-session** — flags any model change that resets the KV cache, naming the turn and models, and explains the per-turn cost penalty on cache-cold turns.
 - **Prompt patterns** — many short prompts → suggests one-shot patterns per Anthropic's Opus 4.7 best-practices.
@@ -128,10 +148,9 @@ The report includes:
 - **`.claudeignore` candidates** — repeated reads/greps into build or dependency dirs (`node_modules`, `dist`, `build`, …) suggests excluding them so they stop burning context.
 - **Inline deterministic work** — ≥2 turns with ≥4000 output tokens and no Bash/Write/Edit suggests the model computed or reformatted data inline instead of scripting it; points to a deterministic-toolkit skill for mechanical work (parsing, converting formats, deduping, aggregating, diffing).
 - **Session-start overhead** — the first API call's input+cache_write is the context loaded before your first word (CLAUDE.md, rules, memory, MCP tool schemas). Shown in the header; flagged as a suggestion when ≥30K tokens.
-- **Cache expirations** — the prompt cache TTL is 5 minutes. Turns that follow a longer idle gap re-write the whole context at 1.25× input instead of reading it at 0.1×; the report counts these and estimates the dollars lost to cold restarts.
+- **Cache expirations** — the prompt cache TTL is 5 minutes by default and 1 hour when the caller opts in (Claude Code main sessions use 1h; subagents use 5m). Turns that follow an idle gap longer than the applicable TTL re-write the whole context at 1.25× (5m) or 2× (1h) input instead of reading it at 0.1×; the report counts these and estimates the dollars lost to cold restarts.
 - **Failed tool calls** — ≥5 errored `tool_result`s flags round-trips burned on permission denials, blocking hooks, or bad paths that usually trace to one fixable cause.
 - **Post-compact re-reads** — files read before auto-compaction and again after it were paid for twice; suggests steering `/compact <what to keep>` or checkpointing before it triggers. The header also shows how many compactions occurred.
-- **Pricing changes** — flags upcoming rate flips (e.g. Sonnet 5 introductory pricing ending 2026-09-01) when they're near, so the cost jump doesn't read as a regression.
 - Tool histogram for the session.
 
 **Note:** The report filters to only the current session's turns using `session_start` from the thermostat hook's state file. If `claude-thermostat.sh` is not also enabled (i.e. no `Stop` hook), `session_start` will be 0 and the report will include all turns in the transcript file, potentially spanning multiple prior sessions.
@@ -187,7 +206,7 @@ The third one is worth pairing with a habit on the human side: one detailed firs
 
 | Mode | What it bills | When to use |
 |---|---|---|
-| `api` (default) | input + `cache_creation` at 1.25× + `cache_read` at 0.1× + output | API pay-as-you-go. Matches Anthropic's [published pricing](https://www.anthropic.com/pricing). Conservative for everyone else. |
+| `api` (default) | input + `cache_creation` at 1.25× (5m) or 2× (1h) + `cache_read` at 0.1× + output | API pay-as-you-go. Matches Anthropic's [published pricing](https://www.anthropic.com/pricing). Conservative for everyone else. |
 | `subscription` (alias: `claude-code`) | input + `cache_creation` at 1.25× + output (cache_read excluded) | Max, Pro, Team, Enterprise. Matches the cost Claude Code shows in its statusline. The dollar figure is an **API-equivalent estimate** — subscription users aren't billed per-token, and Anthropic doesn't publish the subscription quota formula. The figure is useful for orientation and comparison, but it isn't authoritative; use `CLAUDE_THERMOSTAT_WINDOW_TOKENS` for real quota tracking. |
 
 **Why the two modes exist:** Claude Code's statusline reports cost via `cost.total_cost_usd`, which excludes `cache_read`. The Stop hook payload doesn't include that field, so the thermostat recomputes from the transcript. For a cache-heavy session, the two numbers can disagree by 2–3×. Choosing the wrong mode hides money from one side or the other:
@@ -345,7 +364,7 @@ Always-on surface (loaded before your first prompt): ~14,210 tokens
    3,340  ~/.claude/rules/ (6 file(s))
    1,268  skill descriptions (11 skill(s))
      595  global CLAUDE.md  (/Users/you/.claude/CLAUDE.md)
-        -  MCP servers configured (3)  auggie, chrome-devtools, linear
+        -  MCP servers configured (3)  codegraph, chrome-devtools, linear
 
 Flags:
   • `myapp/CLAUDE.md` is ~9,102 tokens of always-on context — move reference material into on-demand skills
@@ -369,7 +388,7 @@ Install: `ln -s /path/to/claude-thermostat/skills/thermostat-checkpoint.md ~/.cl
 
 ## Idle notifications
 
-An open session that sits idle burns money quietly: every gap past the 5-minute cache TTL means the next turn re-writes the full context at 1.25× instead of reading it at 0.1× (the report's **Cache expirations** signal), and sessions left open for hours drift into the **Multi-day session** pattern. `idle-notify.sh` fires a desktop notification (macOS `osascript`, Linux `notify-send`) whenever Claude Code is blocked waiting on you — answer it or close it.
+An open session that sits idle burns money quietly: every gap past the cache TTL (5 minutes, or 1 hour for Claude Code main sessions) means the next turn re-writes the full context at 1.25× instead of reading it at 0.1× (the report's **Cache expirations** signal), and sessions left open for hours drift into the **Multi-day session** pattern. `idle-notify.sh` fires a desktop notification (macOS `osascript`, Linux `notify-send`) whenever Claude Code is blocked waiting on you — answer it or close it.
 
 ```json
 "Notification": [
