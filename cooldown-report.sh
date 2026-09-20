@@ -490,8 +490,9 @@ if len(high_output_inline) >= 2:
         'tool',
         f"{len(high_output_inline)} turns with ≥{OUTPUT_INLINE_THRESH} output tokens and no Bash/Write "
         f"({_total_inline_out//1000}K tokens total) — model may have computed or reformatted data "
-        f"inline instead of scripting it. Install the deterministic-toolkit skill shipped "
-        f"with claude-thermostat (`skills/deterministic-toolkit.md`) for mechanical work: parsing, converting formats, deduping, "
+        f"inline instead of scripting it. Use a deterministic-toolkit skill for mechanical "
+        f"work — available as the `deterministic-toolkit` plugin skill, or the copy "
+        f"bundled here (`skills/deterministic-toolkit.md`): parsing, converting formats, deduping, "
         f"aggregating, validating, diffing. Scripts are deterministic; in-context arithmetic "
         f"and reformatting are not."
     ))

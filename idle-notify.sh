@@ -2,7 +2,8 @@
 # idle-notify: desktop notification when Claude Code is blocked waiting on you.
 #
 # An open session that sits idle burns money quietly: every gap past the
-# 5-minute cache TTL means the next turn re-writes the full context at 1.25x
+# Once the cache TTL lapses the next turn re-writes the full context, at 1.25x
+# base input for a 5m entry or 2x for a 1h one
 # input instead of reading it at 0.1x (the cooldown report's "cache
 # expirations" signal), and sessions left open for hours drift into the
 # multi-day staleness pattern. The cheapest fix is simply knowing the agent

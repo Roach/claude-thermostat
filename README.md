@@ -76,9 +76,9 @@ Instead of (or in addition to) env vars, drop a shell-style config at `~/.claude
 
 ```sh
 # ~/.claude/thermostat/config.env
-CLAUDE_THERMOSTAT_COST_CENTS=3000     # fire at $30 instead of $50
+CLAUDE_THERMOSTAT_COST_CENTS=1500     # fire at $15 instead of $50
 CLAUDE_THERMOSTAT_COOLDOWN_TURNS=15
-CLAUDE_THERMOSTAT_CONTEXT_K=120
+CLAUDE_THERMOSTAT_CONTEXT_K=160
 ```
 
 The config file is sourced before defaults, so its values override any env vars in the calling environment. To temporarily override, edit the file or set `CLAUDE_THERMOSTAT_CONFIG=/dev/null` to skip it entirely.
@@ -128,7 +128,7 @@ The report includes:
 - **`.claudeignore` candidates** — repeated reads/greps into build or dependency dirs (`node_modules`, `dist`, `build`, …) suggests excluding them so they stop burning context.
 - **Inline deterministic work** — ≥2 turns with ≥4000 output tokens and no Bash/Write/Edit suggests the model computed or reformatted data inline instead of scripting it; points to a deterministic-toolkit skill for mechanical work (parsing, converting formats, deduping, aggregating, diffing).
 - **Session-start overhead** — the first API call's input+cache_write is the context loaded before your first word (CLAUDE.md, rules, memory, MCP tool schemas). Shown in the header; flagged as a suggestion when ≥30K tokens.
-- **Cache expirations** — the prompt cache TTL is 5 minutes. Turns that follow a longer idle gap re-write the whole context at 1.25× input instead of reading it at 0.1×; the report counts these and estimates the dollars lost to cold restarts.
+- **Cache expirations** — the prompt cache TTL is 5 minutes by default and 1 hour when the caller opts in (Claude Code main sessions use 1h; subagents use 5m). Turns that follow an idle gap longer than the applicable TTL re-write the whole context at 1.25× (5m) or 2× (1h) input instead of reading it at 0.1×; the report counts these and estimates the dollars lost to cold restarts.
 - **Failed tool calls** — ≥5 errored `tool_result`s flags round-trips burned on permission denials, blocking hooks, or bad paths that usually trace to one fixable cause.
 - **Post-compact re-reads** — files read before auto-compaction and again after it were paid for twice; suggests steering `/compact <what to keep>` or checkpointing before it triggers. The header also shows how many compactions occurred.
 - **Pricing changes** — flags upcoming rate flips (e.g. Sonnet 5 introductory pricing ending 2026-09-01) when they're near, so the cost jump doesn't read as a regression.
@@ -369,7 +369,7 @@ Install: `ln -s /path/to/claude-thermostat/skills/thermostat-checkpoint.md ~/.cl
 
 ## Idle notifications
 
-An open session that sits idle burns money quietly: every gap past the 5-minute cache TTL means the next turn re-writes the full context at 1.25× instead of reading it at 0.1× (the report's **Cache expirations** signal), and sessions left open for hours drift into the **Multi-day session** pattern. `idle-notify.sh` fires a desktop notification (macOS `osascript`, Linux `notify-send`) whenever Claude Code is blocked waiting on you — answer it or close it.
+An open session that sits idle burns money quietly: every gap past the cache TTL (5 minutes, or 1 hour for Claude Code main sessions) means the next turn re-writes the full context at 1.25× instead of reading it at 0.1× (the report's **Cache expirations** signal), and sessions left open for hours drift into the **Multi-day session** pattern. `idle-notify.sh` fires a desktop notification (macOS `osascript`, Linux `notify-send`) whenever Claude Code is blocked waiting on you — answer it or close it.
 
 ```json
 "Notification": [

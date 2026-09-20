@@ -113,7 +113,7 @@ The eight category headings are **stable**:
 | `Better search tool for source files` | Source code files (`.py`, `.ts`, `.js`, `.go`, etc.) re-read 3+ times; use semantic code search instead |
 | `Better tool choices` | Grep/Read chains that semantic code search or a subagent would replace; repeated failed tool calls |
 | `Context hygiene` | Low cache hit rate, model switches, large context, session-start overhead, post-compact re-reads |
-| `Cache economics` | Cache expirations from idle gaps longer than the 5-minute TTL |
+| `Cache economics` | Cache expirations from idle gaps longer than the applicable cache TTL (5m or 1h) |
 | `Prompt patterns` | Short prompt chains, clarification-loop patterns |
 | `Pricing changes` | Upcoming rate flips (e.g. introductory pricing ending) |
 
