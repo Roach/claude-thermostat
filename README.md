@@ -83,6 +83,26 @@ CLAUDE_THERMOSTAT_CONTEXT_K=160
 
 The config file is sourced before defaults, so its values override any env vars in the calling environment. To temporarily override, edit the file or set `CLAUDE_THERMOSTAT_CONFIG=/dev/null` to skip it entirely.
 
+## Checks
+
+`./check.sh` verifies shell and Python syntax and sanity-checks the pricing
+table: every current model must resolve to its own `PRICING` entry rather
+than silently falling back to `DEFAULT_PRICING`, tuples must be 5-wide, and
+each rate must match its published multiplier (5m write 1.25x input, 1h
+write 2x, cache read 0.1x — 0.025x on Fable/Mythos 5.1).
+
+This matters because the hook runs from your working tree: a syntax error
+breaks every turn until it's fixed, and a missing model entry misprices
+every session on that model without any visible error. Enable it as a
+pre-commit hook with:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+To also run it in CI, add a workflow that checks out the repo and runs
+`./check.sh` on `pull_request`.
+
 ## Wiring (`~/.claude/settings.json`)
 
 ```json
