@@ -656,12 +656,22 @@ def _tuning_suggestions(sessions, cost_thresh_cents):
         above_100 = sum(1 for k in nag_ctxs if k >= 100)
         if above_100 / len(nag_ctxs) >= 0.6:
             median_ctx = sorted(nag_ctxs)[len(nag_ctxs) // 2]
-            suggs.append(
-                f"Context is above 100K tokens at alert time in "
-                f"{above_100}/{len(nag_ctxs)} recent nags (median {median_ctx}K). "
-                f"Enable `CLAUDE_THERMOSTAT_CONTEXT_K=90` to catch it earlier, "
-                f"when `/compact` recovers more context."
-            )
+            # Recommend a value that sits below the bulk of observed alert
+            # A threshold that every session crosses is a constant, not a
+            # signal. Aim just under the bulk of observed alert contexts so it
+            # still discriminates, and stay quiet when the live value is
+            # already close — a hardcoded number would recommend itself forever.
+            ck_rec = max(60, int(median_ctx * 0.8) // 10 * 10)
+            ck_live = int(os.environ.get('CLAUDE_THERMOSTAT_CONTEXT_K') or 0)
+            if not (ck_live and abs(ck_live - ck_rec) <= ck_rec * 0.2):
+                _dir = ("fires on nearly every session — raise it"
+                        if ck_live and ck_live < ck_rec else
+                        "would catch this earlier")
+                suggs.append(
+                    f"Context is above 100K tokens at alert time in "
+                    f"{above_100}/{len(nag_ctxs)} recent nags (median {median_ctx}K). "
+                    f"`CLAUDE_THERMOSTAT_CONTEXT_K={ck_rec}` {_dir}."
+                )
 
     # 3. Persistent antipatterns: antipatterns dominate triggers across sessions.
     all_triggers = [t for s in recent for n in (s.get('nag_history') or []) for t in n.get('triggers', [])]
@@ -670,9 +680,9 @@ def _tuning_suggestions(sessions, cost_thresh_cents):
         if ap_share >= 0.6:
             suggs.append(
                 f"Antipatterns trigger {int(ap_share*100)}% of your alerts across recent "
-                f"sessions — the patterns aren't improving. Consider installing the "
-                f"Auggie MCP (`mcp__auggie__codebase-retrieval`) as your primary "
-                f"codebase search: one call replaces most Grep/Read chains."
+                f"sessions — the patterns aren't improving. Consider a semantic "
+                f"code-search tool (e.g. CodeGraph's `codegraph_explore`) as your "
+                f"primary codebase search: one call replaces most Grep/Read chains."
             )
 
     # 4. Alert fatigue: 3+ nags per nagged session on average.
@@ -681,8 +691,9 @@ def _tuning_suggestions(sessions, cost_thresh_cents):
         if avg_nags >= 3:
             suggs.append(
                 f"You average {avg_nags:.1f} alerts per session. If the alerts feel "
-                f"noisy, raise `CLAUDE_THERMOSTAT_COOLDOWN_TURNS` (currently the "
-                f"default 10) to widen the deadband, or increase the cost setpoint."
+                f"noisy, raise `CLAUDE_THERMOSTAT_COOLDOWN_TURNS` (currently "
+                f"{int(os.environ.get('CLAUDE_THERMOSTAT_COOLDOWN_TURNS') or 10)}) "
+                f"to widen the deadband, or increase the cost setpoint."
             )
 
     return suggs
