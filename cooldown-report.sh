@@ -58,13 +58,14 @@ REPORT_FILE="${CLAUDE_COOLDOWN_FILE:-$REPORT_DIR/${session_id}.md}"
 mkdir -p "$(dirname "$REPORT_FILE")"
 
 /usr/bin/python3 - "$transcript_path" "$session_id" "$reason" "$REPORT_FILE" "$LOG" "$session_start" "$state_file" "$TUNING_FILE" <<'PY'
-import json, os, sys, re, time
+import json, os, sys, re
 from collections import Counter, defaultdict
 from datetime import datetime
 
 sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
 from _lib import (
     is_real_user, in_session, turn_cost_usd, dedupe_turn, lookup_pricing,
+    sonnet_savings,
     update_window_index, tokens_in_window, format_token_count,
 )
 
@@ -315,13 +316,17 @@ if prem_turns and per_model_usd:
             out = sum(u.get('output_tokens', 0) for _, u in t)
             if out < 500: cheap_count += 1
         if cheap_count >= 3:
+            # None for an unpriced model: the ratio would come from the
+            # fallback tuple, i.e. invented. Fall back to naming the models.
+            son_x = sonnet_savings(prem_turns[0][1])
             prem_out = lookup_pricing(prem_turns[0][1])[3]
-            son_x = prem_out / lookup_pricing('claude-sonnet-5')[3]
             hai_x = prem_out / lookup_pricing('claude-haiku-4-5')[3]
             label = 'Opus' if prem_turns[0][1].startswith('claude-opus') else 'Fable'
+            _cheaper = (f"Sonnet (~{son_x:.1f}× cheaper) or Haiku (~{hai_x:.0f}× cheaper)"
+                        if son_x else "Sonnet or Haiku")
             suggestions.append((
                 'model',
-                f"{cheap_count} {label} turn(s) produced <500 output tokens — these were small lookups/edits that Sonnet (~{son_x:.1f}× cheaper) or Haiku (~{hai_x:.0f}× cheaper) would have handled. Use `/model sonnet` for routine work; reserve {label} for hard reasoning"
+                f"{cheap_count} {label} turn(s) produced <500 output tokens — these were small lookups/edits that {_cheaper} would have handled. Use `/model sonnet` for routine work; reserve {label} for hard reasoning"
             ))
 
 # 5) Cache hit rate — low cache_read ratio means context churn (rules

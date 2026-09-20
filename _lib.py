@@ -33,7 +33,7 @@ PRICING = {
     'claude-sonnet-4-5':  ( 3.00,  3.75, 0.30, 15.00),
     'claude-haiku-4-5':   ( 1.00,  1.25, 0.10,  5.00),
 }
-DEFAULT_PRICING = (3.00, 3.75, 0.30, 15.00)  # conservative mid-tier fallback
+DEFAULT_PRICING = (3.00, 3.75, 0.30, 15.00)  # Sonnet 4.6 rates; see _warn_unpriced
 
 _warned_models = set()
 
@@ -44,38 +44,61 @@ def _warn_unpriced(model_id):
         return
     _warned_models.add(model_id)
     sys.stderr.write(
-        f'thermostat: no pricing entry for {model_id!r}; '
-        f'using fallback {DEFAULT_PRICING} — costs for this model are wrong. '
-        f'Add it to PRICING in _lib.py.\n')
+        f'thermostat: no pricing entry for {model_id!r}; using fallback rates '
+        f'— costs for this model are wrong. Add it to PRICING in _lib.py.\n')
 
-def lookup_pricing(model_id):
-    """Return the pricing tuple for a transcript `model` string.
+def _resolve_key(model_id):
+    """Return the PRICING key `model_id` maps to, or None if it is unpriced.
 
-    Transcripts sometimes carry dated IDs (e.g. `claude-haiku-4-5-20251001`)
-    or a Claude Code context-tier suffix (e.g. `claude-fable-5[1m]`) that
-    don't match the canonical PRICING keys. We strip any `[...]` suffix, try
-    exact match, then progressively strip trailing `-xxx` segments until we
-    find a hit. The `[1m]` tier carries no pricing premium on any current
-    model, so dropping it is billing-neutral.
-
-    An unmatched model falls back to DEFAULT_PRICING and emits a warning on
-    stderr: a silent fallback silently misprices every session on that model,
-    which is exactly how `claude-opus-5` was billed at Sonnet rates.
+    Transcripts carry dated ids (`claude-haiku-4-5-20251001`) and a Claude Code
+    context-tier suffix (`claude-fable-5[1m]`). Strip the suffix, try an exact
+    match, then drop trailing `-xxx` segments until one hits. The `[1m]` tier
+    carries no pricing premium on any current model, so dropping it is
+    billing-neutral.
     """
     if not model_id:
-        return DEFAULT_PRICING
+        return None
     model_id = model_id.split('[')[0]
-
     if model_id in PRICING:
-        return PRICING[model_id]
+        return model_id
     parts = model_id.split('-')
     while len(parts) > 1:
         parts.pop()
         candidate = '-'.join(parts)
         if candidate in PRICING:
-            return PRICING[candidate]
-    _warn_unpriced(model_id)
-    return DEFAULT_PRICING
+            return candidate
+    return None
+
+
+def lookup_pricing(model_id):
+    """Return the pricing tuple for a transcript `model` string.
+
+    An unpriced model falls back to DEFAULT_PRICING and warns on stderr; a
+    silent fallback misprices every session on that model.
+    """
+    key = _resolve_key(model_id)
+    if key is None:
+        _warn_unpriced(model_id)
+        return DEFAULT_PRICING
+    return PRICING[key]
+
+
+def sonnet_savings(model_id):
+    """How many times cheaper Sonnet 5's output is than `model_id`'s, or None.
+
+    None means there is no honest number to show — either the model is
+    unpriced (the ratio would be derived from DEFAULT_PRICING, i.e. invented)
+    or it is not more expensive than Sonnet. Callers omit the suggestion
+    rather than print a fabricated figure. Output price alone is
+    representative: input, cache and output ratios are uniform per family.
+    """
+    key = _resolve_key(model_id)
+    if key is None:
+        return None
+    cur, son = PRICING[key][3], PRICING['claude-sonnet-5'][3]
+    if not son or cur <= son:
+        return None
+    return cur / son
 
 
 def dedupe_turn(turn):
