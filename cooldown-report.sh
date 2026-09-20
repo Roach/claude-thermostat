@@ -66,7 +66,6 @@ sys.path.insert(0, os.environ['THERMOSTAT_LIB_DIR'])
 from _lib import (
     is_real_user, in_session, turn_cost_usd, dedupe_turn, lookup_pricing,
     update_window_index, tokens_in_window, format_token_count,
-    _SONNET_5_INTRO_END,
 )
 
 path, session_id, reason, report_file, log_file = sys.argv[1:6]
@@ -554,18 +553,6 @@ if compacts and compact_read_pos is not None:
             f"{len(re_read)} file(s) re-read after compaction ({_sample}) — compaction dropped "
             f"content you paid to read, then you paid to read it again. Steer it with "
             f"`/compact <what to keep>`, or checkpoint (commit + push) and start fresh before it triggers"
-        ))
-
-# 18) Sonnet 5 introductory pricing ends 2026-09-01 — flag when the flip is
-#     close so the cost jump doesn't read as a regression.
-if any('sonnet-5' in m for m in per_model_usd):
-    _days_left = int((_SONNET_5_INTRO_END - time.time()) // 86400)
-    if 0 <= _days_left <= 45:
-        suggestions.append((
-            'pricing',
-            f"Heads-up: Sonnet 5 introductory pricing ($2/$10 per MTok) ends 2026-09-01 "
-            f"({_days_left} days) — costs will rise ~50% at standard rates ($3/$15). "
-            f"Not a regression when it happens"
         ))
 
 # 19) Multi-day / stale session — a transcript left open half a day or more
