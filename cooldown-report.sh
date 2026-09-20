@@ -258,7 +258,7 @@ for f, n in read_counts.most_common(8):
     if ext in SOURCE_EXTS:
         suggestions.append((
             'search',
-            f"Read `{f}` {n}× — use semantic code search (e.g. CodeGraph's `codegraph_explore`) for lookups into this file instead of re-reading it"
+            f"Read `{f}` {n}× — use semantic code search (e.g. CodeGraph's `codegraph_explore`, or `codegraph explore` in-shell) for lookups into this file instead of re-reading it"
         ))
     else:
         suggestions.append((
