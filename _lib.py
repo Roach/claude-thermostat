@@ -1,31 +1,52 @@
 import glob
 import json
 import os
+import sys
 import time
 from datetime import datetime
 
 # (input, cache_write_5m, cache_read, output) per million tokens.
+#
+# Source: https://platform.claude.com/docs/en/about-claude/pricing
+# Verified 2026-09-20 against the published table. Cache read is 0.1x input
+# on every family EXCEPT Fable 5.1 / Mythos 5.1, which are 0.025x — their
+# own rows exist so they don't suffix-strip onto the 5 rows and get billed 4x.
+#
+# The 1h cache write tier (2x input) is NOT modelled here; the table's second
+# slot is the 5m rate (1.25x) only. Published 1h writes, for whenever that is
+# wired up: Fable/Mythos $20, Opus $10, Sonnet 5 $4, Sonnet 4.x $6, Haiku 4.5 $2.
 # Keys are the unversioned model family; lookup_pricing strips date suffixes
 # like "-20251001" before matching, so dated IDs in transcripts still resolve.
 # Verify against https://www.anthropic.com/pricing whenever a new model ships.
 PRICING = {
+    'claude-fable-5-1':   (10.00, 12.50, 0.25, 50.00),
+    'claude-mythos-5-1':  (10.00, 12.50, 0.25, 50.00),
     'claude-fable-5':     (10.00, 12.50, 1.00, 50.00),
     'claude-mythos-5':    (10.00, 12.50, 1.00, 50.00),
+    'claude-opus-5':      ( 5.00,  6.25, 0.50, 25.00),
     'claude-opus-4-8':    ( 5.00,  6.25, 0.50, 25.00),
     'claude-opus-4-7':    ( 5.00,  6.25, 0.50, 25.00),
     'claude-opus-4-6':    ( 5.00,  6.25, 0.50, 25.00),
-    'claude-sonnet-5':    ( 3.00,  3.75, 0.30, 15.00),
+    'claude-opus-4-5':    ( 5.00,  6.25, 0.50, 25.00),
+    'claude-sonnet-5':    ( 2.00,  2.50, 0.20, 10.00),
     'claude-sonnet-4-6':  ( 3.00,  3.75, 0.30, 15.00),
+    'claude-sonnet-4-5':  ( 3.00,  3.75, 0.30, 15.00),
     'claude-haiku-4-5':   ( 1.00,  1.25, 0.10,  5.00),
 }
-DEFAULT_PRICING = (3.00, 3.75, 0.30, 15.00)  # Sonnet as fallback
+DEFAULT_PRICING = (3.00, 3.75, 0.30, 15.00)  # conservative mid-tier fallback
 
-# Sonnet 5 launched with introductory pricing ($2/$10) through 2026-08-31;
-# standard $3/$15 applies from 2026-09-01. Sessions are billed at whichever
-# rate is live now — close enough since reports run at session end.
-_SONNET_5_INTRO = (2.00, 2.50, 0.20, 10.00)
-_SONNET_5_INTRO_END = datetime(2026, 9, 1).timestamp()
+_warned_models = set()
 
+
+def _warn_unpriced(model_id):
+    """Warn once per model id that we are guessing its price."""
+    if model_id in _warned_models:
+        return
+    _warned_models.add(model_id)
+    sys.stderr.write(
+        f'thermostat: no pricing entry for {model_id!r}; '
+        f'using fallback {DEFAULT_PRICING} — costs for this model are wrong. '
+        f'Add it to PRICING in _lib.py.\n')
 
 def lookup_pricing(model_id):
     """Return the pricing tuple for a transcript `model` string.
@@ -35,26 +56,25 @@ def lookup_pricing(model_id):
     don't match the canonical PRICING keys. We strip any `[...]` suffix, try
     exact match, then progressively strip trailing `-xxx` segments until we
     find a hit. The `[1m]` tier carries no pricing premium on any current
-    model, so dropping it is billing-neutral. Falls back to Sonnet pricing
-    when nothing matches.
+    model, so dropping it is billing-neutral.
+
+    An unmatched model falls back to DEFAULT_PRICING and emits a warning on
+    stderr: a silent fallback silently misprices every session on that model,
+    which is exactly how `claude-opus-5` was billed at Sonnet rates.
     """
     if not model_id:
         return DEFAULT_PRICING
     model_id = model_id.split('[')[0]
 
-    def _resolve(key):
-        if key == 'claude-sonnet-5' and time.time() < _SONNET_5_INTRO_END:
-            return _SONNET_5_INTRO
-        return PRICING[key]
-
     if model_id in PRICING:
-        return _resolve(model_id)
+        return PRICING[model_id]
     parts = model_id.split('-')
     while len(parts) > 1:
         parts.pop()
         candidate = '-'.join(parts)
         if candidate in PRICING:
-            return _resolve(candidate)
+            return PRICING[candidate]
+    _warn_unpriced(model_id)
     return DEFAULT_PRICING
 
 
