@@ -5,35 +5,35 @@ import sys
 import time
 from datetime import datetime
 
-# (input, cache_write_5m, cache_read, output) per million tokens.
+# (input, cache_write_5m, cache_read, output, cache_write_1h) per million
+# tokens. The 1h rate is 2x input; the 5m rate is 1.25x.
 #
 # Source: https://platform.claude.com/docs/en/about-claude/pricing
 # Verified 2026-09-20 against the published table. Cache read is 0.1x input
 # on every family EXCEPT Fable 5.1 / Mythos 5.1, which are 0.025x — their
 # own rows exist so they don't suffix-strip onto the 5 rows and get billed 4x.
 #
-# The 1h cache write tier (2x input) is NOT modelled here; the table's second
-# slot is the 5m rate (1.25x) only. Published 1h writes, for whenever that is
-# wired up: Fable/Mythos $20, Opus $10, Sonnet 5 $4, Sonnet 4.x $6, Haiku 4.5 $2.
+# Claude Code main sessions write the cache at the 1h tier; subagent
+# transcripts use 5m. Both are billed from their own slot.
 # Keys are the unversioned model family; lookup_pricing strips date suffixes
 # like "-20251001" before matching, so dated IDs in transcripts still resolve.
 # Verify against https://www.anthropic.com/pricing whenever a new model ships.
 PRICING = {
-    'claude-fable-5-1':   (10.00, 12.50, 0.25, 50.00),
-    'claude-mythos-5-1':  (10.00, 12.50, 0.25, 50.00),
-    'claude-fable-5':     (10.00, 12.50, 1.00, 50.00),
-    'claude-mythos-5':    (10.00, 12.50, 1.00, 50.00),
-    'claude-opus-5':      ( 5.00,  6.25, 0.50, 25.00),
-    'claude-opus-4-8':    ( 5.00,  6.25, 0.50, 25.00),
-    'claude-opus-4-7':    ( 5.00,  6.25, 0.50, 25.00),
-    'claude-opus-4-6':    ( 5.00,  6.25, 0.50, 25.00),
-    'claude-opus-4-5':    ( 5.00,  6.25, 0.50, 25.00),
-    'claude-sonnet-5':    ( 2.00,  2.50, 0.20, 10.00),
-    'claude-sonnet-4-6':  ( 3.00,  3.75, 0.30, 15.00),
-    'claude-sonnet-4-5':  ( 3.00,  3.75, 0.30, 15.00),
-    'claude-haiku-4-5':   ( 1.00,  1.25, 0.10,  5.00),
+    'claude-fable-5-1':   (10.00, 12.50, 0.25, 50.00, 20.00),
+    'claude-mythos-5-1':  (10.00, 12.50, 0.25, 50.00, 20.00),
+    'claude-fable-5':     (10.00, 12.50, 1.00, 50.00, 20.00),
+    'claude-mythos-5':    (10.00, 12.50, 1.00, 50.00, 20.00),
+    'claude-opus-5':      ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-opus-4-8':    ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-opus-4-7':    ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-opus-4-6':    ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-opus-4-5':    ( 5.00,  6.25, 0.50, 25.00, 10.00),
+    'claude-sonnet-5':    ( 2.00,  2.50, 0.20, 10.00,  4.00),
+    'claude-sonnet-4-6':  ( 3.00,  3.75, 0.30, 15.00,  6.00),
+    'claude-sonnet-4-5':  ( 3.00,  3.75, 0.30, 15.00,  6.00),
+    'claude-haiku-4-5':   ( 1.00,  1.25, 0.10,  5.00,  2.00),
 }
-DEFAULT_PRICING = (3.00, 3.75, 0.30, 15.00)  # Sonnet 4.6 rates; see _warn_unpriced
+DEFAULT_PRICING = (3.00, 3.75, 0.30, 15.00, 6.00)  # Sonnet 4.6 rates; see _warn_unpriced
 
 _warned_models = set()
 
@@ -151,10 +151,17 @@ def turn_cost_usd(turn, model_id, mode='api'):
     cw  = sum(u.get('cache_creation_input_tokens', 0) for u in usages)
     cr  = sum(u.get('cache_read_input_tokens', 0) for u in usages)
     out = sum(u.get('output_tokens', 0) for u in usages)
+    # Cache writes bill 1.25x input at the 5m tier and 2x at 1h. Transcripts
+    # since ~Aug 2026 break the split out in `cache_creation`; without it we
+    # can only assume 5m. Main sessions run 1h, so pricing the whole lot at
+    # the 5m rate understated every cache write by 60%.
+    cw1 = sum((u.get('cache_creation') or {}).get('ephemeral_1h_input_tokens', 0)
+              for u in usages)
+    cw5 = cw - cw1
     # 'subscription' and its legacy alias 'claude-code' both drop cache_read;
     # only 'api' bills it at the 0.1x input rate.
     cr_cost = cr * p[2] if mode == 'api' else 0
-    cost = (inp * p[0] + cw * p[1] + cr_cost + out * p[3]) / 1_000_000
+    cost = (inp * p[0] + cw5 * p[1] + cw1 * p[4] + cr_cost + out * p[3]) / 1_000_000
     return cost, inp, cw, cr, out
 
 

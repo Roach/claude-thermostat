@@ -512,23 +512,35 @@ if first_overhead and first_overhead >= 30_000:
 #     follows a longer idle gap re-writes the context at 1.25x input instead
 #     of reading it at 0.1x. Detected: >5.5min gap AND a large cache_write on
 #     the following call.
+# The gap that counts as an expiry depends on which TTL the write used, so
+# read it off the write itself rather than assuming 5m: Claude Code main
+# sessions write at the 1h tier, subagents at 5m. Assuming 5m everywhere
+# reported ~40% false expiries on a 1h session, and priced the re-write at
+# the wrong rate on top.
 expiries = 0
 expiry_wasted_usd = 0.0
+_ttl_seen = set()
 _prev_ts = None
 for _tsu, _mdl, _u in usage_seq:
     _cw = _u.get('cache_creation_input_tokens', 0) or 0
-    if _prev_ts and _tsu and _tsu - _prev_ts > 330 and _cw > 20_000:
+    _cw1 = (_u.get('cache_creation') or {}).get('ephemeral_1h_input_tokens', 0) or 0
+    _is_1h = _cw1 > _cw / 2 if _cw else False
+    _gap = 3660 if _is_1h else 330
+    if _prev_ts and _tsu and _tsu - _prev_ts > _gap and _cw > 20_000:
         _p = lookup_pricing(_mdl)
+        _wr = _p[4] if _is_1h else _p[1]
         expiries += 1
-        expiry_wasted_usd += _cw * (_p[1] - _p[2]) / 1_000_000
+        _ttl_seen.add('1h' if _is_1h else '5min')
+        expiry_wasted_usd += _cw * (_wr - _p[2]) / 1_000_000
     if _tsu:
         _prev_ts = _tsu
 if expiries >= 2:
+    _ttl_label = '/'.join(sorted(_ttl_seen)) or '5min'
     suggestions.append((
         'cache',
-        f"{expiries} cache expiration(s): turns that followed a >5min idle gap re-wrote the full "
-        f"context (~${expiry_wasted_usd:.2f} extra vs a warm cache — the 5-minute cache TTL had "
-        f"lapsed). Batch prompts while the cache is warm, or close the session when stepping away"
+        f"{expiries} cache expiration(s): turns that followed an idle gap longer than the cache "
+        f"TTL ({_ttl_label}) re-wrote the full context (~${expiry_wasted_usd:.2f} extra vs a warm "
+        f"cache). Batch prompts while the cache is warm, or close the session when stepping away"
     ))
 
 # 16) Failed tool calls — each errored tool_result costs a full round-trip and

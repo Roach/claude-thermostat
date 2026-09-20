@@ -187,7 +187,7 @@ The third one is worth pairing with a habit on the human side: one detailed firs
 
 | Mode | What it bills | When to use |
 |---|---|---|
-| `api` (default) | input + `cache_creation` at 1.25× + `cache_read` at 0.1× + output | API pay-as-you-go. Matches Anthropic's [published pricing](https://www.anthropic.com/pricing). Conservative for everyone else. |
+| `api` (default) | input + `cache_creation` at 1.25× (5m) or 2× (1h) + `cache_read` at 0.1× + output | API pay-as-you-go. Matches Anthropic's [published pricing](https://www.anthropic.com/pricing). Conservative for everyone else. |
 | `subscription` (alias: `claude-code`) | input + `cache_creation` at 1.25× + output (cache_read excluded) | Max, Pro, Team, Enterprise. Matches the cost Claude Code shows in its statusline. The dollar figure is an **API-equivalent estimate** — subscription users aren't billed per-token, and Anthropic doesn't publish the subscription quota formula. The figure is useful for orientation and comparison, but it isn't authoritative; use `CLAUDE_THERMOSTAT_WINDOW_TOKENS` for real quota tracking. |
 
 **Why the two modes exist:** Claude Code's statusline reports cost via `cost.total_cost_usd`, which excludes `cache_read`. The Stop hook payload doesn't include that field, so the thermostat recomputes from the transcript. For a cache-heavy session, the two numbers can disagree by 2–3×. Choosing the wrong mode hides money from one side or the other:
