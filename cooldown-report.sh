@@ -792,9 +792,8 @@ if suggestions:
         'prompt': 'Prompt patterns',
         'context':'Context hygiene',
         'cache':  'Cache economics',
-        'pricing':'Pricing changes',
     }
-    for kind in ('model', 'skill', 'search', 'tool', 'context', 'cache', 'prompt', 'pricing'):
+    for kind in ('model', 'skill', 'search', 'tool', 'context', 'cache', 'prompt'):
         if kind not in by_kind: continue
         lines.append(f"### {titles[kind]}")
         for s in by_kind[kind]:
@@ -895,12 +894,11 @@ if suggestions:
         'context':'Context hygiene',
         'cache':  'Cache economics',
         'prompt': 'Prompt patterns',
-        'pricing':'Pricing changes',
     }
     by_kind = defaultdict(list)
     for kind, s in suggestions:
         by_kind[kind].append(s)
-    for kind in ('model', 'skill', 'search', 'tool', 'context', 'cache', 'prompt', 'pricing'):
+    for kind in ('model', 'skill', 'search', 'tool', 'context', 'cache', 'prompt'):
         if kind not in by_kind: continue
         print(f"\n  {_c(BOLD, titles[kind])}:", file=sys.stderr)
         for s in by_kind[kind]:

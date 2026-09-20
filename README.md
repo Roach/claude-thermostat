@@ -131,7 +131,6 @@ The report includes:
 - **Cache expirations** — the prompt cache TTL is 5 minutes by default and 1 hour when the caller opts in (Claude Code main sessions use 1h; subagents use 5m). Turns that follow an idle gap longer than the applicable TTL re-write the whole context at 1.25× (5m) or 2× (1h) input instead of reading it at 0.1×; the report counts these and estimates the dollars lost to cold restarts.
 - **Failed tool calls** — ≥5 errored `tool_result`s flags round-trips burned on permission denials, blocking hooks, or bad paths that usually trace to one fixable cause.
 - **Post-compact re-reads** — files read before auto-compaction and again after it were paid for twice; suggests steering `/compact <what to keep>` or checkpointing before it triggers. The header also shows how many compactions occurred.
-- **Pricing changes** — flags upcoming rate flips (e.g. Sonnet 5 introductory pricing ending 2026-09-01) when they're near, so the cost jump doesn't read as a regression.
 - Tool histogram for the session.
 
 **Note:** The report filters to only the current session's turns using `session_start` from the thermostat hook's state file. If `claude-thermostat.sh` is not also enabled (i.e. no `Stop` hook), `session_start` will be 0 and the report will include all turns in the transcript file, potentially spanning multiple prior sessions.
