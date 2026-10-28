@@ -21,6 +21,7 @@
 #   CLAUDE_THERMOSTAT_CONTEXT_K       0     0 = disabled
 #   CLAUDE_THERMOSTAT_CACHE_HIT_MIN   0     0 = disabled; fire when session cache hit % drops below this
 #   CLAUDE_THERMOSTAT_COOLDOWN_TURNS  10    turns between re-fires after first
+#   CLAUDE_THERMOSTAT_DISABLE         0     1 = kill switch, hook exits 0 at once
 #   CLAUDE_THERMOSTAT_COST_MODE       api   'api' = include cache_read at 0.1x
 #                                            input (matches published Anthropic
 #                                            pricing). 'claude-code' = exclude
@@ -38,6 +39,11 @@
 # Wire-up (~/.claude/settings.json):
 #   "Stop": [{ "hooks": [{ "type": "command",
 #              "command": "/abs/path/to/claude-thermostat/claude-thermostat.sh" }] }]
+#
+# Per-session mute: a marker file ~/.claude/thermostat/<session_id>.muted makes
+# the hook exit 0 before any analysis. Manage it with thermostat-mute.sh. It is
+# a sibling file, not a state field, because the analysis pass rewrites the
+# state JSON from a fixed set of keys and would drop an extra `muted` key.
 #
 # State lives at ~/.claude/thermostat/<session_id>.json. Since the incremental
 # rework, the state file also carries a `tx` block (transcript byte offset,
@@ -64,6 +70,9 @@ if [ -f "$CONFIG_FILE" ]; then
   # shellcheck disable=SC1090
   . "$CONFIG_FILE"
 fi
+
+# Global kill switch (env or config.env): exit before reading stdin or parsing.
+if [ "${CLAUDE_THERMOSTAT_DISABLE:-0}" = "1" ]; then exit 0; fi
 
 # Cost is the only setpoint enabled by default — short, expensive turns
 # matter more than long, cheap ones. Time / turns / context are computed
@@ -97,6 +106,12 @@ SUBAGENT_MODEL="${CLAUDE_THERMOSTAT_SUBAGENT_MODEL:-}"
 
 input="$(cat)"
 now=$(date +%s)
+
+# Per-session mute: cheap marker-file check before the python analysis. The id
+# is pulled with sed and format-checked so it can't point outside STATE_DIR;
+# anything unparseable falls through to normal analysis (fail open).
+mute_sid="$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([0-9A-Za-z_-]*\)".*/\1/p' | head -n 1)"
+if [ -n "$mute_sid" ] && [ -f "$STATE_DIR/$mute_sid.muted" ]; then exit 0; fi
 
 # --- single-pass incremental analysis ----------------------------------------
 #

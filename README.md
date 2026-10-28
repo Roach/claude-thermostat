@@ -61,6 +61,7 @@ Safe to delete — recreated on next session.
 | `CLAUDE_THERMOSTAT_CONTEXT_K` | `0` | Last-turn input-context setpoint (K tokens); `0` disables |
 | `CLAUDE_THERMOSTAT_CACHE_HIT_MIN` | `0` | Cache-hit-% setpoint; fires when the session cache hit rate falls below this value (requires ≥3 turns). `0` disables. |
 | `CLAUDE_THERMOSTAT_COOLDOWN_TURNS` | `10` | Deadband: turns between re-fires after first |
+| `CLAUDE_THERMOSTAT_DISABLE` | `0` | Set to `1` (env or `config.env`) to silence the hook everywhere; it exits 0 immediately. For one session only, see [Muting a session](#muting-a-session) |
 | `CLAUDE_THERMOSTAT_ANTIPATTERNS` | `1` | Set to `0` to disable antipattern detection |
 | `CLAUDE_THERMOSTAT_COST_MODE` | `api` | `api` includes `cache_read` at 0.1× input (matches Anthropic's published API rates). `subscription` (alias: `claude-code`) excludes `cache_read`, matching the cost number Claude Code shows in its statusline for Max / Pro / Team / Enterprise plans. See [Cost modes](#cost-modes) |
 | `CLAUDE_THERMOSTAT_WINDOW_SEC` | `18000` | Rolling-window length in seconds (default 5h) |
@@ -82,6 +83,10 @@ CLAUDE_THERMOSTAT_CONTEXT_K=160
 ```
 
 The config file is sourced before defaults, so its values override any env vars in the calling environment. To temporarily override, edit the file or set `CLAUDE_THERMOSTAT_CONFIG=/dev/null` to skip it entirely.
+
+### Muting a session
+
+`./thermostat-mute.sh` mutes the most recently active session (prints its id); `./thermostat-mute.sh <session_id>` targets one; `--unmute [session_id]` re-enables; `--status` lists muted sessions. It writes `~/.claude/thermostat/<session_id>.muted`, which the hook checks before any analysis. Muting is per session and never touches setpoints; `/thermostat-mute` does the same from inside Claude.
 
 ## Checks
 
